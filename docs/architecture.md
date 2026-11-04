@@ -128,8 +128,34 @@ only in `nativeTest` and never packaged into the APK.
 Storage: one feature record is five `float32` values plus 32 descriptor bytes, behind the versioned
 `S3DFEAT1` header (D023). Keypoints are stored in level-0 pixel coordinates with their scale, so a
 feature file does not depend on the pyramid that produced it. The pipeline is native-only for now;
-the bridge still exposes only the Phase 2 handle API, and Phase 4 adds the entry points that consume
-matches.
+the bridge still exposes only the Phase 2 handle API, and the path from captured frames to matches
+is not wired into the app yet.
+
+## Sparse reconstruction (Phase 4)
+
+```
+pixels + camera model per view, matches between neighbouring views
+  └─ reconstruct (core/sfm/pipeline.cpp)
+       ├─ TrackBuilder: union-find over (view, feature) -> one track per 3D point
+       ├─ seed: initializeTwoView on a matched pair (essential matrix, four pose candidates,
+       │        cheirality with a reprojection tie-break), then a PnP polish on its inliers
+       ├─ grow: PnP/RANSAC per unregistered view against the map, keyframe gate
+       │        (rotation window, baseline, overlap), re-triangulate, BA, outlier removal
+       └─ finalize: bundle adjustment, outlier removal, duplicate merge, report
+            └─ { camera poses, sparse points, ReconstructionReport }
+```
+
+`core/sfm/` owns the reconstruction and depends only on `core/geometry/` and `core/sfm/types.hpp`.
+It takes pixels and camera models rather than a `FeatureSet`, so the tests need no rendering and
+nothing in the module touches Android. Two decisions shape it: the result is defined only up to a
+similarity (the first camera is fixed and the global scale is free), and a seed pair is trusted only
+after a third view registers against it, because a mirrored two-view decomposition fits its own pair
+exactly (D029). Bundle adjustment is Levenberg-Marquardt with the Schur complement on the point
+blocks, so only the 6N camera system is ever factorised (D028).
+
+`tests/synthetic/sfm_scan.cpp` builds the turntable scan used by both the tests and
+`tests/tools/sfm_report.cpp`, the desktop binary that prints the acceptance numbers. Like the match
+visualizer it is built only in `nativeTest` and never packaged into the APK.
 
 ## Current phase status
 
@@ -152,4 +178,11 @@ matches.
   tests. The synthetic acceptance (95.7% verified inlier precision) is measured; the real-object
   requirement of 100 verified inliers has not been run (D026,
   `docs/benchmarks/phase3-feature-verification.md`).
-- Everything after Phase 3 is unimplemented; `roadmap.md` is the source of truth.
+- Phase 4 implemented, real-scan acceptance outstanding: two-view initialisation, triangulation,
+  PnP with RANSAC, the keyframe policy, sparse bundle adjustment with the Schur complement, the map
+  store with track management and outlier removal, and the reconstruction report are in place and
+  covered by host tests. The synthetic acceptance is measured (16 of 16 views, 0.588 px mean
+  reprojection, 0.261 degree worst pose error); the real-object requirement of 90 percent
+  registered keyframes has not been run, and the app-side path from captured frames to matches is
+  still missing (D030, `docs/benchmarks/phase4-sfm-verification.md`).
+- Phases 5 and later are unimplemented; `roadmap.md` is the source of truth.

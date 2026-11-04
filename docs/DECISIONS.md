@@ -300,3 +300,56 @@ here with its version, license and reason (agents.md sections 2 and 7).
 - **Consequence:** roadmap 2.1-2.6 stay `[~]` and M1 stays unclaimable; Phase 2 must not be
   described as accepted, only as device-smoke-tested. Closing it needs a reference rig (or an
   agreed substitute) and either a gyro-less device or a debug sensor-injection path.
+
+### D028 - Phase 4 core: DLT plus Gauss-Newton, and a bundle adjustment that only factorises cameras
+- **Reason:** agents.md rules out COLMAP, OpenCV and Eigen, so triangulation, PnP and bundle
+  adjustment are written here. Triangulation and PnP both start from a linear DLT solve (smallest
+  eigenvector of the 4x4 or 12x12 normal equations) and finish with a few Gauss-Newton steps, which
+  removes the algebraic bias without a second estimator. Bundle adjustment is Levenberg-Marquardt
+  with the Schur complement on the point blocks, so only the 6N camera system is factorised; with
+  64 points and 40 views that is the difference between a 240x240 and a 2106x2106 solve.
+- **Gauge:** the first registered camera is held fixed. That leaves the global scale free, which is
+  not a shortcut but the nature of monocular SfM: relative rotation and the direction of each
+  baseline are observable, absolute distance is not. The acceptance numbers are therefore reported
+  gauge-free (relative rotation, baseline direction), and a two-view seed has a unit baseline by
+  construction.
+- **Conventions:** poses are camera-to-world `(R, C)`; a step is `R <- R * Exp(delta)` and
+  `C <- C + delta`, so `dXc/dtheta = [Xc]x` and `dXc/dC = -R^T`. The normal equations are
+  `H d = J^T r`, so `d` is the ascent direction and every update subtracts it. Huber loss at 2 px
+  keeps a stray observation from dominating a camera.
+- **Consequence:** on the 16-view synthetic scan the mean reprojection error is 0.588 px and the
+  worst pose error 0.261 degrees, both well inside the roadmap bounds.
+
+### D029 - A seed pair is trusted only after a third view registers against it
+- **Reason:** both decompositions of an essential matrix reproduce the same two images, so a
+  mirrored pair fits its own pair exactly. Neither cheirality nor reprojection error can choose
+  between them: on the same synthetic scan the mirror scored *better* (0.08 px median) than the
+  correct pair (0.2-0.7 px). Only a third view contradicts a mirror.
+- **Rule:** `reconstruct` seeds from the pair with the most matches, triangulates, tries to register
+  any other view, and moves to the next pair (at most eight attempts) when nothing grows. Within the
+  seed, cheirality decides between the four candidates and the reprojection error only breaks ties.
+  Failed views are re-evaluated on every pass instead of being skipped, and a pass that registers
+  nothing ends the growth loop.
+- **Two-view bundle adjustment is refused:** with two cameras BA can trade the whole reconstruction
+  for the mirrored one at the same cost, so `finalize` only runs it from three views up. Growth is
+  also swept over all unregistered views per pass rather than extending from one end, so a scan
+  seeded in the middle grows in both directions.
+- **Consequence:** before this rule the same scan reconstructed correctly at 16 views and locked
+  onto a mirror at 12 and 24; every view count from 12 to 40 now reconstructs fully. The cost is
+  that seeding may evaluate up to eight pairs, which dominates the runtime at 40 views (30 s).
+
+### D030 - Phase 4 acceptance: synthetic half measured, real-scan half deferred
+- **Decision:** roadmap 4.1-4.6 are implemented and host-tested, and stay `[~]` until a real scan is
+  run. The synthetic half is met with margin: 16 of 16 views registered, mean reprojection 0.588 px
+  and worst pose error 0.261 degrees on the 16-view turntable scan, with the same behaviour from 12
+  to 40 views and at twice the nominal pixel noise.
+- **Not run:** the real-object requirement of at least 90 percent registered keyframes. There is no
+  real capture in this repository and no app-side path from captured frames to matches, so there is
+  nothing to point at a real object; a real scan also has no ground truth beyond a visual check.
+  No real-data number is reported anywhere.
+- **Commit shape:** Phase 4 lands in two commits, code and tests first, then documentation, for the
+  same reason as D026: the tasks share the same files and a per-task split would produce commits
+  that do not build on their own.
+- **Consequence:** Phase 5 (live overlay) can consume this module, but the bridge still exposes only
+  the Phase 2 handle API. Wiring capture -> features -> matches -> reconstruction is the next piece
+  of work, and the 90 percent real-scan measurement depends on it.

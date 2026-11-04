@@ -89,14 +89,23 @@ evidence, and what a real-image run still has to show.
 ## Phase 4 - Incremental SfM
 Goal: camera poses and a sparse point cloud from a capture session.
 
-- [ ] 4.1 Two-view initialization with triangulation
-- [ ] 4.2 Triangulation and PnP with RANSAC
-- [ ] 4.3 Keyframe selection (baseline, overlap, IMU prior)
-- [ ] 4.4 Sparse bundle adjustment (Gauss-Newton or Levenberg-Marquardt with Schur complement)
-- [ ] 4.5 Map store with track management and outlier removal
-- [ ] 4.6 Reconstruction report (registered images, points, reprojection error)
+- [~] 4.1 Two-view initialization with triangulation
+- [~] 4.2 Triangulation and PnP with RANSAC
+- [~] 4.3 Keyframe selection (baseline, overlap, IMU prior)
+- [~] 4.4 Sparse bundle adjustment (Gauss-Newton or Levenberg-Marquardt with Schur complement)
+- [~] 4.5 Map store with track management and outlier removal
+- [~] 4.6 Reconstruction report (registered images, points, reprojection error)
 
 **Acceptance:** synthetic turntable scan reconstructs with mean reprojection error below 1 px and pose error below 1 degree; a real object scan registers at least 90 percent of keyframes.
+
+**Status:** implementation and host tests are complete for all six tasks (9 new gtest cases; 57
+native tests in total, 37 JUnit cases unchanged, `assembleDebug` green), plus a desktop report
+tool. The synthetic half of the acceptance line is met and measured on a 16-view turntable scan: 16
+of 16 views registered, mean reprojection error 0.588 px, worst pose error 0.261 degrees. The
+real-object half (at least 90 percent of keyframes) has **not** been run, because the app has no
+path from captured frames to matches yet (D030). `[~]` therefore means "code done, acceptance
+pending", the same convention as Phases 2 and 3. Measured numbers, the view-count and noise
+sweeps, and the limits of that evidence are in `docs/benchmarks/phase4-sfm-verification.md`.
 
 ---
 
