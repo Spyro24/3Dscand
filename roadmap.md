@@ -39,14 +39,20 @@ Goal: a stable camera session with a monochrome live preview and saved photos.
 ## Phase 2 - IMU orientation
 Goal: reliable phone orientation with timestamps synced to frames.
 
-- [ ] 2.1 Read gyroscope, accelerometer, magnetometer and rotation vector sensors
-- [ ] 2.2 Implement Madgwick or Mahony filter in `core/sensors/`
-- [ ] 2.3 Sync sensor timestamps with camera timestamps (same clock, measured offset)
-- [ ] 2.4 Angular-rate monitor: warn when motion will cause blur
-- [ ] 2.5 Fallback path for devices without a usable gyroscope
-- [ ] 2.6 Use IMU rotation as the prior for keyframe selection
+- [~] 2.1 Read gyroscope, accelerometer, magnetometer and rotation vector sensors
+- [~] 2.2 Implement Madgwick or Mahony filter in `core/sensors/`
+- [~] 2.3 Sync sensor timestamps with camera timestamps (same clock, measured offset)
+- [~] 2.4 Angular-rate monitor: warn when motion will cause blur
+- [~] 2.5 Fallback path for devices without a usable gyroscope
+- [~] 2.6 Use IMU rotation as the prior for keyframe selection
 
 **Acceptance:** orientation error below 2 degrees against a reference rig; frame-to-sensor time offset measured and stored per device; app runs in the fallback path on a test device without a gyroscope.
+
+**Status:** implementation and host tests are complete for all six tasks (36 new JUnit cases,
+18 new gtest cases, `assembleDebug` green). The acceptance line above is measured on hardware and
+has **not** been run: no device was available for this pass. `[~]` therefore means "code done,
+acceptance pending" (D021). `docs/benchmarks/phase2-imu-verification.md` lists what the host tests
+prove, what they cannot, and the exact device procedure that closes the phase.
 
 ---
 

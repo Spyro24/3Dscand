@@ -42,6 +42,7 @@ sensors stay on the Kotlin side.
 | JPEG reader (`HandlerThread`) | `ImageReader` JPEG planes, file writes | Hands metadata to the session store |
 | GL thread (`GLSurfaceView`) | Preview texture, shader, viewport | Only GL calls |
 | Benchmark writer | JSONL appends | Single writer, daemon thread |
+| Sensor (`HandlerThread`) | `SensorManager` listeners, fusion feed | Only sensor callbacks; never blocks the camera or the UI |
 
 State crosses threads through `StateFlow` in the ViewModel; Compose collects with
 `collectAsState` and never blocks on a camera operation.
@@ -71,6 +72,35 @@ After warm-up the session locks auto-exposure, auto-white-balance and auto-focus
 measured values, so consecutive frames share one photometric setting. The lock values are
 written into the manifest, because reconstruction depends on them staying constant.
 
+## Sensor pipeline (Phase 2)
+
+```
+SensorManager (gyro 5 ms, accel 10 ms, mag + rotation vector 20 ms)
+  └─ imu-sensors thread → ImuSample(timestamp_ns, gyro, accel, mag)
+       ├─ AngularRateMonitor → blur warning in CaptureUiState (no gyro → Unavailable)
+       └─ ImuFusion (JNI) → Mahony filter → ImuRingBuffer
+                              └─ ImuFrameAnnotator: orientation, clock residual, keyframe flag
+                                   └─ FrameRecord → session.json (schema 2)
+```
+
+Samples are driven by the gyroscope and by the accelerometer when there is no gyro. The fusion
+session lives in C++ (`core/sensors/`) behind `core/bridge/`; the rotation vector is read for
+diagnostics but not fused, because the OS value cannot be tied to our own filter state.
+
+Without a gyroscope the same session falls back to gravity plus magnetic north: pitch and roll stay
+observable, yaw exists only with a magnetometer, and the capture screen says so. That is the
+reduced-accuracy path agents.md section 4 requires.
+
+Clock handling: both streams are read on the boot-relative clock, and the residual between a frame
+timestamp and its nearest sensor sample is measured per session (median and MAD). The median is
+stored per device in `files/devices/<model>.profile` and shifts the next session's pairing lookup;
+the manifest records what this session measured. It is a measurement with an uncertainty, not a
+calibration (D020).
+
+Keyframes: the first oriented frame anchors the scan, a frame rotated inside the 0.10-0.70 rad
+window is marked `keyframe_candidate`, and an overshoot re-anchors so one fast turn does not end
+the selection. Phase 4 owns the final decision; the IMU only knows rotation, never translation.
+
 ## Current phase status
 
 - Phase 0 complete: project, native bridge, local test harnesses, synthetic scenes, benchmarks,
@@ -80,4 +110,8 @@ written into the manifest, because reconstruction depends on them staying consta
   torn down on the camera thread, the UI shows the `CameraLost` screen, and Retry builds a fresh
   controller and re-locks; a preview surface arriving while the UI is in a terminal state is
   ignored (D017).
-- Everything after Phase 1 is unimplemented; `roadmap.md` is the source of truth.
+- Phase 2 implemented, hardware acceptance outstanding: sensors, Mahony fusion, the tilt
+  fallback, the blur monitor, per-frame clock pairing and the keyframe prior are in place and
+  covered by host tests, but no device was available to run the acceptance measurements (D021,
+  `docs/benchmarks/phase2-imu-verification.md`).
+- Everything after Phase 2 is unimplemented; `roadmap.md` is the source of truth.

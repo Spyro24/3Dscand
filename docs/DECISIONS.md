@@ -72,7 +72,8 @@ here with its version, license and reason (agents.md sections 2 and 7).
 
 ## Open items
 - CI pipeline (roadmap 12.1) - not set up yet; builds and tests are verified locally (D010).
-- `docs/architecture.md` (roadmap 0.7) - not written yet.
+- Phase 2 device acceptance (roadmap 2.1-2.6) - code and host tests are complete, the hardware
+  measurements are outstanding because no device was available (D021).
 - Feature detector, meshing strategy and segmentation model (agents.md section 7) - still open,
   decided in Phases 3, 7 and 8.
 
@@ -143,3 +144,59 @@ here with its version, license and reason (agents.md sections 2 and 7).
   starts and stops capture deterministically. It is not part of a release build.
 - **Consequence:** Verification commands target the receiver by component; release builds expose
   no extra entry point.
+
+### D018 - Mahony filter, fixed sensor rates and a gravity/magnetometer fallback
+- **License:** none; `core/sensors/` is our own C++17 code, so no third-party dependency is added.
+- **Reason:** agents.md section 7 allows Madgwick or Mahony. Mahony was chosen because its
+  correction step is short enough to audit line by line and is unit-testable against synthetic
+  gravity and magnetic vectors; Madgwick's gradient adds a Jacobian whose sign errors show up as a
+  slow drift that a short test would miss. Rates: gyroscope 5 ms (~200 Hz), accelerometer 10 ms,
+  magnetometer and rotation vector 20 ms. The fusion integrates on the gyro timestamps and clamps
+  `dt` to 0.5-100 ms, so a delayed or duplicated sample cannot blow the state up.
+- **Fallback (2.5):** without a gyroscope the same session computes orientation from gravity
+  (`tiltOrientation`) and smooths it with a normalized lerp. Pitch and roll are observable; yaw
+  exists only if a magnetometer does, which is exactly what the reduced-accuracy hint tells the
+  user.
+- **Consequence:** fixed gains (proportional 0.6, magnetic weight 0.5) and no gyro bias estimate.
+  A capture burst lasts seconds and Phase 4 bundle adjustment refines poses, so short-term drift is
+  acceptable; if the device run shows otherwise, an integral term is the next step.
+
+### D019 - Session manifest schema 2 carries the IMU snapshot per frame
+- **Reason:** Roadmap 2.3 needs the camera/sensor offset per frame, and agents.md section 3 says
+  every captured frame carries an IMU orientation snapshot. Schema 1 had no place for either.
+- **Shape:** each frame entry gains `orientation_wxyz` (w, x, y, z), `imu_timestamp_ns`,
+  `imu_time_offset_ns` and `keyframe_candidate`. The manifest gains `clock`
+  (`camera_source`, `sensor_source`, `offset_ns`, `offset_mad_ns`, `samples`) and `imu` (`mode`,
+  `reduced_accuracy`, `keyframe_candidates`).
+- **Consequence:** `schema` is now 2. Every added field is optional, so a schema 1 session still
+  reads; new readers must key on `schema` instead of assuming the fields exist.
+
+### D020 - Per-device clock profile measures the residual, it does not assume zero
+- **What is measured:** the median and median absolute deviation of
+  `sample_timestamp_ns - frame_timestamp_ns` over the session's pairings. Both Android streams are
+  boot-relative (`elapsedRealtimeNanos` on API 29+), so what remains is pipeline residual plus any
+  device that reports `SENSOR_INFO_TIMESTAMP_SOURCE_UNKNOWN`. The camera's own source is recorded
+  in the manifest rather than assumed.
+- **Storage:** `files/devices/<model>.profile`, a `key=value` text file. Deliberately not JSON:
+  the store is covered by host unit tests, where the platform `org.json` classes are stubs, and a
+  file this small does not justify a test-only dependency (agents.md section 5, rule 5).
+- **Use:** the next session on the same model shifts its pairing lookup by the stored offset; the
+  in-session measurement is what the manifest records.
+- **Consequence:** this is a measurement with an uncertainty, not a calibration certificate.
+  Phases 4 and 5 must carry `offset_mad_ns` along and not treat the offset as exact.
+
+### D021 - Phase 2 hardware acceptance deferred, not waived
+- **Decision:** roadmap 2.1-2.6 are implemented and host-tested, and stay `[~]` until the device
+  run recorded in `docs/benchmarks/phase2-imu-verification.md` is done. No phone was connected for
+  this pass, so none of the hardware acceptance was run.
+- **Verified instead:** 18 new gtest cases (quaternion math, Mahony convergence on synthetic
+  gravity and magnetic vectors, tilt fallback, keyframe window, handle lifetime and malformed
+  input) and 36 new JUnit cases (availability mapping, nearest-sample pairing, blur hysteresis,
+  residual statistics, keyframe policy, profile persistence, pipeline glue); `assembleDebug`
+  packages the new native symbols.
+- **Not verified:** real sensor rates, orientation error against a reference rig, the measured
+  offset on the SM-G930F, the no-gyroscope path on hardware, and preview frame rate with the
+  sensor thread running.
+- **Consequence:** the M1 milestone (Phases 0-2) is not claimable yet, and the Phase 2 acceptance
+  numbers must not be reported as measured. Phase 3 work can proceed because feature code does not
+  depend on those numbers, but the device run has to happen before the M1 claim.

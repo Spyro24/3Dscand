@@ -41,6 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class CameraCaptureController(
     context: Context,
     private val listener: Listener,
+    private val recorder: SessionRecorder? = null,
 ) {
 
     interface Listener {
@@ -59,6 +60,9 @@ class CameraCaptureController(
 
     val previewSizePx: Size
     val stillSizePx: Size
+
+    /** Camera2's timestamp source: "realtime" means the same clock as the sensors. */
+    val cameraClockSource: String
 
     private val cameraId: String?
     private val sensorOrientationDeg: Int
@@ -93,6 +97,7 @@ class CameraCaptureController(
         var still = Size(1920, 1080)
         var orientation = 90
         var fps: Range<Int>? = null
+        var clockSource = "unknown"
         var error: String? = null
 
         try {
@@ -107,6 +112,14 @@ class CameraCaptureController(
                 fps = chooseFpsRange(characteristics)
             }
             orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+            clockSource = if (
+                characteristics.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) ==
+                CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
+            ) {
+                "realtime"
+            } else {
+                "unknown"
+            }
         } catch (t: Throwable) {
             error = t.message ?: t.javaClass.simpleName
         }
@@ -117,6 +130,7 @@ class CameraCaptureController(
         stillSizePx = still
         sensorOrientationDeg = orientation
         fpsRange = fps
+        cameraClockSource = clockSource
     }
 
     /** Loads total numbers of preview frames buffered; used by later phases and diagnostics. */
@@ -225,7 +239,7 @@ class CameraCaptureController(
         val settings = lockedSettings
         val queued = runCatching {
             fileWriter.execute {
-                store?.writeManifest(settings, android.os.Build.MODEL)
+                store?.writeManifest(settings, android.os.Build.MODEL, recorder?.metadata(cameraClockSource))
                 if (shutdownWriter) {
                     fileWriter.shutdown()
                 }
@@ -236,7 +250,7 @@ class CameraCaptureController(
         // frames that did reach disk.
         if (!queued && store != null) {
             runCatching {
-                store.writeManifest(settings, android.os.Build.MODEL)
+                store.writeManifest(settings, android.os.Build.MODEL, recorder?.metadata(cameraClockSource))
                 if (shutdownWriter) {
                     fileWriter.shutdown()
                 }
@@ -517,9 +531,6 @@ class CameraCaptureController(
             image.close()
         }
 
-        if (store == null) {
-            return
-        }
         pendingStill = null
         val index = savedFrames.incrementAndGet()
 
@@ -538,8 +549,11 @@ class CameraCaptureController(
                     focus_diopter = metadata?.focus_diopter ?: 0f,
                     relative_path = store.frameRelativePath(index),
                 )
-                store.appendFrame(record)
-                listener.onFrameSaved(index, record)
+                // The recorder adds orientation, the measured clock residual and the keyframe
+                // prior; without a sensor layer the frame is stored exactly as captured.
+                val annotated = recorder?.annotate(record) ?: record
+                store.appendFrame(annotated)
+                listener.onFrameSaved(index, annotated)
                 if (index % 10 == 0) {
                     Log.i(LOG_TAG, "saved frame $index")
                 }

@@ -39,6 +39,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.scand3d.R
 import com.scand3d.render.MonochromePreviewRenderer
+import com.scand3d.sensors.ImuMode
+import com.scand3d.sensors.MotionWarning
 
 @Composable
 fun CaptureRoute(viewModel: CaptureViewModel = viewModel()) {
@@ -181,6 +183,37 @@ private fun StatusPanel(state: CaptureUiState) {
                     locked.iso,
                 ),
                 color = MaterialTheme.colorScheme.outline,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        if (state.keyframe_candidates > 0) {
+            Text(
+                text = stringResource(R.string.capture_status_keyframes, state.keyframe_candidates),
+                color = MaterialTheme.colorScheme.outline,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        // agents.md section 4: say so when the fallback is active instead of showing a pose the
+        // device cannot actually know.
+        if (state.imu_mode == null || state.imu_mode == ImuMode.Unavailable) {
+            Text(
+                text = stringResource(R.string.capture_imu_unavailable),
+                color = MaterialTheme.colorScheme.outline,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+            )
+        } else if (state.imu_reduced_accuracy) {
+            Text(
+                text = stringResource(R.string.capture_imu_reduced_accuracy),
+                color = MaterialTheme.colorScheme.outline,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+            )
+        }
+        if (state.motion == MotionWarning.BlurRisk) {
+            Text(
+                text = stringResource(R.string.capture_motion_blur),
+                color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
             )
         }

@@ -1,6 +1,8 @@
 package com.scand3d.ui
 
 import com.scand3d.capture.LockedCaptureSettings
+import com.scand3d.sensors.ImuMode
+import com.scand3d.sensors.MotionWarning
 
 /** The five app states from agents.md section 4; Phase 1 exercises the first four. */
 enum class CapturePhase {
@@ -23,4 +25,9 @@ data class CaptureUiState(
     val savedFrames: Int = 0,
     val sessionRelativePath: String? = null,
     val message: String? = null,
+    /** Null until the sensor layer has reported what the device can do. */
+    val imu_mode: ImuMode? = null,
+    val imu_reduced_accuracy: Boolean = false,
+    val motion: MotionWarning = MotionWarning.Steady,
+    val keyframe_candidates: Int = 0,
 )
