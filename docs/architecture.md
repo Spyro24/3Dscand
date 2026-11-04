@@ -101,6 +101,36 @@ Keyframes: the first oriented frame anchors the scan, a frame rotated inside the
 window is marked `keyframe_candidate`, and an overshoot re-anchors so one fast turn does not end
 the selection. Phase 4 owns the final decision; the IMU only knows rotation, never translation.
 
+## Feature pipeline (Phase 3)
+
+```
+GrayImage (level 0)
+  └─ buildPyramid: blur sigma 1.2, then half-resolution levels (D022)
+       └─ detectFastCorners (FAST-9 per level, non-max suppression)
+            └─ extractFeatures: map back to level-0 pixels, dedup by 2 px, keep the strongest
+                 └─ describeBrief (BRIEF-256, ±15 px patch, unsteered)
+                      └─ FeatureSet { keypoints, descriptors }  -> saveFeatures (S3DFEAT1)
+
+FeatureSet A + FeatureSet B
+  └─ matchBruteForce / matchApproximate (Hamming, ratio 0.8)
+       └─ PointCorrespondence[] (pixels)
+            └─ estimateFundamentalRansac / estimateEssentialRansac (8-point, Sampson, refit)
+                 └─ { matrix, inlier indices, median Sampson px }
+```
+
+`core/feature/` owns detection, description, matching and the feature store; `core/geometry/` owns
+the linear algebra and the two-view estimators. Neither depends on Android. `tests/synthetic/`
+renders the textured box used as ground truth, `tests/native/geometry_test.cpp` builds its own
+non-coplanar lattice because a coplanar scene makes the eight-point problem ambiguous, and
+`tests/tools/` holds the PGM/PPM helpers plus the `match_visualizer` desktop binary, which is built
+only in `nativeTest` and never packaged into the APK.
+
+Storage: one feature record is five `float32` values plus 32 descriptor bytes, behind the versioned
+`S3DFEAT1` header (D023). Keypoints are stored in level-0 pixel coordinates with their scale, so a
+feature file does not depend on the pyramid that produced it. The pipeline is native-only for now;
+the bridge still exposes only the Phase 2 handle API, and Phase 4 adds the entry points that consume
+matches.
+
 ## Current phase status
 
 - Phase 0 complete: project, native bridge, local test harnesses, synthetic scenes, benchmarks,
@@ -114,4 +144,10 @@ the selection. Phase 4 owns the final decision; the IMU only knows rotation, nev
   fallback, the blur monitor, per-frame clock pairing and the keyframe prior are in place and
   covered by host tests, but no device was available to run the acceptance measurements (D021,
   `docs/benchmarks/phase2-imu-verification.md`).
-- Everything after Phase 2 is unimplemented; `roadmap.md` is the source of truth.
+- Phase 3 implemented, real-image acceptance outstanding: FAST-9 on a pyramid, unsteered
+  BRIEF-256 descriptors, binary feature storage, exhaustive and approximate matching, RANSAC for
+  the fundamental and essential matrix, and the match visualizer are in place and covered by host
+  tests. The synthetic acceptance (95.7% verified inlier precision) is measured; the real-object
+  requirement of 100 verified inliers has not been run (D026,
+  `docs/benchmarks/phase3-feature-verification.md`).
+- Everything after Phase 3 is unimplemented; `roadmap.md` is the source of truth.

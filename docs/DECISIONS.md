@@ -200,3 +200,81 @@ here with its version, license and reason (agents.md sections 2 and 7).
 - **Consequence:** the M1 milestone (Phases 0-2) is not claimable yet, and the Phase 2 acceptance
   numbers must not be reported as measured. Phase 3 work can proceed because feature code does not
   depend on those numbers, but the device run has to happen before the M1 claim.
+
+### D022 - FAST-9 on a three-level pyramid, unsteered BRIEF-256 descriptors
+- **License:** none; `core/feature/` is our own C++17 code. No OpenCV, no Eigen.
+- **Reason:** agents.md section 7 allows SIFT-like or ORB, and ORB's FAST corner is short enough to
+  audit and cheap enough for a phone. Detector: FAST-9 with threshold 20 on three levels (level 0
+  blurred with sigma 1.2, then half-resolution levels blurred with sigma 1.0), 3x3 non-maximum
+  suppression by response, 2 px cross-scale dedup keeping the stronger keypoint, at most 1200
+  features. Descriptor: 256 fixed comparison pairs inside a 31x31 patch, bilinear sampling, pattern
+  generated once from a fixed seed so builds stay comparable.
+- **Steering removed after measurement:** the intensity-centroid angle is still computed and stored
+  in `Keypoint.angle_rad`, but `describeBrief` is called with zero rotation. On the textured-box
+  pair, steering the pattern by that angle reduced verified inlier precision from 95.7% (22 of 23)
+  to 78% (18 of 23): the centroid of a low-texture quad corner moves between views, so the pattern
+  was rotated by a different angle in each image.
+- **Consequence:** matches survive the 30 degree turntable step but not an in-plane camera rotation
+  yet. Rotation-aware matching (for example trying the stored angle, or several orientations) is a
+  later task, and `angle_rad` is metadata until then. A half-resolution view matches only the
+  pyramid level with the same physical footprint: 79.5% of those bridged matches were consistent
+  within 3 px, which is a measured limitation, not scale invariance.
+
+### D023 - Feature storage is a versioned little-endian binary, not JSON
+- **Format:** magic `S3DFEAT1`, `uint32` version 1, `uint32` count, then one record per feature:
+  five `float32` values (`x_px`, `y_px`, `scale`, `angle_rad`, `response`) followed by the 32
+  descriptor bytes. 52 bytes per feature, so 1200 features are about 61 KB.
+- **Reason:** a JSON manifest for the same data is several times larger, loses exact float bits and
+  needs a JSON dependency on the host tests (agents.md section 5, rule 5). Binary keeps the store
+  testable with plain file IO and keeps descriptor bits byte-exact, which matching requires.
+- **Validation:** the loader rejects a wrong magic, an unknown version, a count above 1e6 and any
+  file whose size does not match `12 + count * 52`. Truncation cannot be read as a shorter valid
+  set.
+- **Consequence:** the layout is fixed little-endian; adding a field means bumping the version and
+  keeping the version-1 reader, because stored sessions outlive the build.
+
+### D024 - Exhaustive Hamming matching plus a multi-index approximate matcher, ratio 0.8
+- **Reason:** 256-bit descriptors are compared by Hamming distance, so the exhaustive matcher is a
+  straightforward reference. The approximate matcher splits the descriptor into eight 32-bit
+  blocks, indexes each block separately and compares only descriptors that share at least one
+  block with the query; a bucket with fewer than 6 or more than 400 entries falls back to the
+  exhaustive search, so the fast path never silently loses candidates.
+- **Ratio test:** the best match must be better than the second best by `ratio_percent` 80. `bestTwo`
+  distinguishes "no second candidate" from "second distance is zero": an earlier version used 0
+  for both and rejected a descriptor that matched itself exactly.
+- **Cross-check:** offered by the exhaustive matcher only. The approximate matcher would need a
+  reverse index over the query set, and callers that want it can use the exhaustive path.
+- **Consequence:** measured recall of the approximate matcher against exhaustive passes 0.85; the
+  approximate path is for Phase 4's larger maps, where exhaustive search stops being affordable.
+
+### D025 - Hartley-normalized eight-point inside RANSAC, with iterative refit
+- **Reason:** the eight-point algorithm is the smallest estimator the roadmap allows, and Hartley
+  normalization keeps the 9x9 normal equations well conditioned at pixel scale. The required
+  linear algebra (Jacobi eigen solver for the 9x9 system, 3x3 SVD for rank enforcement) is written
+  in `core/geometry/linalg.cpp`; Eigen is not used anywhere (agents.md section 2).
+- **Constraints:** the fundamental matrix has its smallest singular value forced to zero; the
+  essential matrix has its two largest singular values set equal, which is the calibrated
+  constraint. Inliers are measured by Sampson distance in pixels, and the essential path converts
+  the pixel threshold into normalized coordinates by the geometric mean focal length.
+- **Refit:** after RANSAC picks the best minimal-sample model, the estimator alternates refitting on
+  all inliers and reclassifying, at most four rounds, until the inlier set settles. One refit left
+  the model visibly biased (median Sampson 0.91 px on the synthetic pair); the loop brings it below
+  0.5 px and makes the reported inliers match the matrix that is actually returned.
+- **Adaptive stopping:** the required iteration count is computed and compared as a `double`, and it
+  may only shorten the budget. The first version cast the estimate to `int`; for a weak inlier ratio
+  the value is astronomically large, the cast overflowed, and RANSAC silently stopped after one
+  iteration with an invalid result.
+
+### D026 - Phase 3 acceptance: synthetic half measured, real-object half deferred
+- **Decision:** roadmap 3.1-3.5 are implemented and host-tested, and stay `[~]` until a real image
+  pair is run. The synthetic half of the acceptance line is met: 95.7% of the RANSAC inliers (22 of
+  23) map to the same known 3D point, and the geometry suite recovers F and E from 35% outliers at
+  0.35 px noise.
+- **Not run:** the real-object requirement of at least 100 verified inliers. There is no phone and
+  no real image pair in this environment; a real pair has no ground truth beyond the visual overlay.
+  No number for real data is reported anywhere in this repository.
+- **Commit shape:** Phase 3 landed in two commits, code and tests first, then documentation, because
+  the tasks share the same files and a per-task split would have produced commits that do not
+  build on their own. This is the same deviation recorded for Phase 2.
+- **Consequence:** the pipeline is not yet reachable from the app; `core/bridge/` still exposes only
+  the Phase 2 handle API, and Phase 4 adds the calls that consume matches.

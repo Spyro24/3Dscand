@@ -59,13 +59,23 @@ prove, what they cannot, and the exact device procedure that closes the phase.
 ## Phase 3 - Features and matching
 Goal: our own feature pipeline, verified on known data.
 
-- [ ] 3.1 Scale-space keypoint detector (SIFT-like or ORB, see agents.md section 7)
-- [ ] 3.2 Descriptor computation and storage
-- [ ] 3.3 Brute-force and approximate nearest-neighbor matching with ratio test
-- [ ] 3.4 RANSAC for essential and fundamental matrix estimation
-- [ ] 3.5 Match visualization tool for debugging (desktop-side test tool)
+- [~] 3.1 Scale-space keypoint detector (SIFT-like or ORB, see agents.md section 7)
+- [~] 3.2 Descriptor computation and storage
+- [~] 3.3 Brute-force and approximate nearest-neighbor matching with ratio test
+- [~] 3.4 RANSAC for essential and fundamental matrix estimation
+- [~] 3.5 Match visualization tool for debugging (desktop-side test tool)
 
 **Acceptance:** on synthetic image pairs with known ground truth, at least 95 percent of inlier matches are correct; on real object pairs, at least 100 verified inliers.
+
+**Status:** implementation and host tests are complete for all five tasks (19 new gtest cases; 48
+native tests in total, 37 JUnit cases unchanged, `assembleDebug` green). The synthetic half of the
+acceptance line is met and measured: 95.7 percent of the RANSAC inliers (22 of 23) map to the same
+known 3D point across two views. The real-object half (at least 100 verified inliers) has **not**
+been run: no phone and no real image pair were available (D026). `[~]` therefore means "code done,
+acceptance pending", exactly as in Phase 2. The pipeline is not yet reachable from the app; the
+bridge wiring belongs to Phase 4, which is also the first consumer of the matches.
+`docs/benchmarks/phase3-feature-verification.md` lists the measured numbers, the limits of that
+evidence, and what a real-image run still has to show.
 
 ---
 
