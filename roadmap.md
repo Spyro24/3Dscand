@@ -48,11 +48,18 @@ Goal: reliable phone orientation with timestamps synced to frames.
 
 **Acceptance:** orientation error below 2 degrees against a reference rig; frame-to-sensor time offset measured and stored per device; app runs in the fallback path on a test device without a gyroscope.
 
-**Status:** implementation and host tests are complete for all six tasks (36 new JUnit cases,
-18 new gtest cases, `assembleDebug` green). The acceptance line above is measured on hardware and
-has **not** been run: no device was available for this pass. `[~]` therefore means "code done,
-acceptance pending" (D021). `docs/benchmarks/phase2-imu-verification.md` lists what the host tests
-prove, what they cannot, and the exact device procedure that closes the phase.
+**Status:** implementation, host tests and one device smoke run are complete for all six tasks (36
+new JUnit cases, 18 new gtest cases, `assembleDebug` green). On the SM-G930F the run confirmed the
+sensor set and rates (accel ~100 Hz, gyro ~199 Hz), schema-2 manifests with per-frame IMU data, a
+measured camera/sensor offset of -0.37 to -0.70 ms with ~1 ms MAD, the persisted per-device
+profile, and 27.1 fps preview during capture. It also exposed a real defect: the final session of a
+run lost its `clock`/`imu` blocks when a late frame rewrote the manifest, now fixed. Two acceptance
+items remain **unmeasured**: orientation error against a reference rig (the planned 90 degree table
+check was declined, so no accuracy number exists) and the no-gyroscope fallback on hardware (the
+SM-G930F has a gyro, D010 rules out a second device). `[~]` therefore means "code and device smoke
+test done, reference measurement pending" (D021, D027).
+`docs/benchmarks/phase2-imu-verification.md` records the measurements and the exact procedures that
+close the phase.
 
 ---
 

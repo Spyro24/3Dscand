@@ -140,10 +140,12 @@ matches.
   torn down on the camera thread, the UI shows the `CameraLost` screen, and Retry builds a fresh
   controller and re-locks; a preview surface arriving while the UI is in a terminal state is
   ignored (D017).
-- Phase 2 implemented, hardware acceptance outstanding: sensors, Mahony fusion, the tilt
-  fallback, the blur monitor, per-frame clock pairing and the keyframe prior are in place and
-  covered by host tests, but no device was available to run the acceptance measurements (D021,
-  `docs/benchmarks/phase2-imu-verification.md`).
+- Phase 2 implemented and smoke-tested on the SM-G930F, reference accuracy outstanding: sensors,
+  Mahony fusion, the tilt fallback, the blur monitor, per-frame clock pairing and the keyframe
+  prior are in place, covered by host tests, and now confirmed on device for sensor rates, schema-2
+  manifests, the measured clock offset, the persisted device profile and 27.1 fps preview. The
+  2 degree orientation bound against a reference and the no-gyroscope fallback are still unmeasured
+  (D021, D027, `docs/benchmarks/phase2-imu-verification.md`).
 - Phase 3 implemented, real-image acceptance outstanding: FAST-9 on a pyramid, unsteered
   BRIEF-256 descriptors, binary feature storage, exhaustive and approximate matching, RANSAC for
   the fundamental and essential matrix, and the match visualizer are in place and covered by host

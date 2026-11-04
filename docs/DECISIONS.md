@@ -278,3 +278,25 @@ here with its version, license and reason (agents.md sections 2 and 7).
   build on their own. This is the same deviation recorded for Phase 2.
 - **Consequence:** the pipeline is not yet reachable from the app; `core/bridge/` still exposes only
   the Phase 2 handle API, and Phase 4 adds the calls that consume matches.
+
+### D027 - Phase 2 device run on the SM-G930F: measured, fixed, still open
+- **Measured:** the K6DS3TR accelerometer and gyroscope deliver events 10.0 ms and 5.03 ms apart
+  (~100 Hz and ~199 Hz), matching the rates D018 chose; the app reports `imu mode=NineAxis` with
+  `reduced_accuracy=false`. A schema-2 session carries 17 of 17 frames with orientation and offset,
+  and the `clock`/`imu` blocks. Preview holds 27.1 fps median (33.3-38.3 ms intervals) while stills
+  save, with thermal status `NONE`.
+- **Clock:** measured offsets are -373.5 us, -699.5 us and -431.2 us across three sessions with MAD
+  0.93-1.20 ms. The per-device profile stores the at-stop snapshot (-431.2 us, 16 samples), which
+  can differ from the manifest's final value (17 samples) when a late frame lands after the stop
+  flush. The profile is a starting point for the next session, not a record of this one (D020).
+- **Fixed:** the late-frame manifest rewrite passed no session metadata, so the last session of a
+  run lost its `clock`/`imu` blocks (session `20261104-151236`, 13 frames, no clock block). It now
+  routes through `flushManifest` and the next run kept both (`1521eaf`).
+- **Still open:** the roadmap's orientation error bound of 2 degrees is **not measured**. The
+  substitute procedure (a 90 degree table turn with the phone aligned to a table edge) was declined
+  during this pass, so there is no reference number, and the 4.63 degree change seen across a
+  static 10 s hold is motion or drift, not accuracy. The no-gyroscope fallback also remains
+  unexercised on hardware, because this device has a gyroscope and D010 rules out a second one.
+- **Consequence:** roadmap 2.1-2.6 stay `[~]` and M1 stays unclaimable; Phase 2 must not be
+  described as accepted, only as device-smoke-tested. Closing it needs a reference rig (or an
+  agreed substitute) and either a gyro-less device or a debug sensor-injection path.
