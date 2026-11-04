@@ -13,6 +13,14 @@ add_library(scand3d_core SHARED
     bridge/bridge_api.cpp
     bridge/jni_bridge.cpp
     bridge/native_init.cpp
+    feature/brief_descriptor.cpp
+    feature/fast_detector.cpp
+    feature/feature_extractor.cpp
+    feature/feature_store.cpp
+    feature/gray_image.cpp
+    feature/matcher.cpp
+    geometry/linalg.cpp
+    geometry/two_view.cpp
     sensors/keyframe_prior.cpp
     sensors/mahony_filter.cpp
     sensors/tilt_orientation.cpp

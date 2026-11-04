@@ -83,4 +83,36 @@ Image render(const Scene& scene, int camera_index);
 /// used as matching ground truth.
 std::vector<std::pair<int, Projection>> visibleVertices(const Scene& scene, int camera_index);
 
+/// A distinct 3D point of the mesh that faces this camera, with one of its projections. Several
+/// triangles share a grid corner, so `id` is stable across duplicates while `projection` is any
+/// of them. Feature tests match keypoints back to these points (roadmap 3.1-3.3).
+struct SurfaceVertex {
+    int id = 0;
+    Vec3 position_m{};
+    Projection projection{};
+};
+
+/// Box whose six faces are divided into `cells_per_axis` quads with a deterministic speckle
+/// albedo. The pattern gives the feature pipeline many corners with known 3D positions on a
+/// non-coplanar surface, which flat-shaded boxes cannot.
+Mesh makeTexturedBox(
+    const Vec3& min_m,
+    const Vec3& max_m,
+    int cells_per_axis,
+    std::uint32_t seed);
+
+/// Turntable ring around a textured box, using the same camera layout as the plain scene.
+Scene makeTexturedBoxScene(
+    int ring_count,
+    double radius_m,
+    double height_m,
+    int width_px,
+    int height_px,
+    double focal_px,
+    int cells_per_axis,
+    std::uint32_t seed);
+
+/// Vertices of front-facing triangles that project inside the image, deduplicated by position.
+std::vector<SurfaceVertex> visibleSurfaceVertices(const Scene& scene, int camera_index);
+
 }  // namespace scand3d::synthetic

@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
+#include <map>
 
 namespace scand3d::synthetic {
 namespace {
@@ -30,6 +32,44 @@ Vec3 scaled(const Vec3& a, double factor) {
 
 // Object centre in meters; the turntable cameras aim here.
 constexpr double kObjectCentreZ_m = 0.5;
+
+void addRingCameras(
+    Scene& scene,
+    int ring_count,
+    double radius_m,
+    double height_m,
+    int width_px,
+    int height_px,
+    double focal_px,
+    const Vec3& target_m) {
+    const double two_pi = 2.0 * std::acos(-1.0);
+    scene.cameras.reserve(static_cast<std::size_t>(std::max(ring_count, 0)));
+    for (int i = 0; i < ring_count; ++i) {
+        const double angle_rad = two_pi * static_cast<double>(i) / static_cast<double>(ring_count);
+        const Vec3 eye_m{radius_m * std::cos(angle_rad), radius_m * std::sin(angle_rad), height_m};
+
+        Camera camera;
+        camera.width_px = width_px;
+        camera.height_px = height_px;
+        camera.focal_px = focal_px;
+        camera.cx_px = 0.5 * static_cast<double>(width_px);
+        camera.cy_px = 0.5 * static_cast<double>(height_px);
+        camera.pose_camera_to_world = lookAtCameraToWorld(eye_m, target_m, {0.0, 0.0, 1.0});
+        scene.cameras.push_back(camera);
+    }
+}
+
+std::uint32_t hashCell(int face, int i, int j, std::uint32_t seed) {
+    std::uint32_t h = seed + 0x9E3779B9u * static_cast<std::uint32_t>(face + 1) +
+                      0x85EBCA6Bu * static_cast<std::uint32_t>(i) +
+                      0xC2B2AE35u * static_cast<std::uint32_t>(j);
+    h ^= h >> 16;
+    h *= 0x7FEB352Du;
+    h ^= h >> 15;
+    h *= 0x846CA68Bu;
+    h ^= h >> 16;
+    return h;
+}
 
 // Adds one quad as two triangles. Each face gets its own vertices so it can carry a flat normal.
 void addQuad(Mesh& mesh, const std::array<Vec3, 4>& corners, const Vec3& normal, std::uint8_t albedo) {
@@ -140,23 +180,8 @@ Scene makeTurntableScene(
     double focal_px) {
     Scene scene;
     scene.mesh = makeTurntableObject();
-
-    const Vec3 target{0.0, 0.0, kObjectCentreZ_m};
-    const double two_pi = 2.0 * std::acos(-1.0);
-    scene.cameras.reserve(static_cast<std::size_t>(std::max(ring_count, 0)));
-    for (int i = 0; i < ring_count; ++i) {
-        const double angle_rad = two_pi * static_cast<double>(i) / static_cast<double>(ring_count);
-        const Vec3 eye_m{radius_m * std::cos(angle_rad), radius_m * std::sin(angle_rad), height_m};
-
-        Camera camera;
-        camera.width_px = width_px;
-        camera.height_px = height_px;
-        camera.focal_px = focal_px;
-        camera.cx_px = 0.5 * static_cast<double>(width_px);
-        camera.cy_px = 0.5 * static_cast<double>(height_px);
-        camera.pose_camera_to_world = lookAtCameraToWorld(eye_m, target, {0.0, 0.0, 1.0});
-        scene.cameras.push_back(camera);
-    }
+    addRingCameras(scene, ring_count, radius_m, height_m, width_px, height_px, focal_px,
+                   {0.0, 0.0, kObjectCentreZ_m});
     return scene;
 }
 
@@ -262,6 +287,126 @@ std::vector<std::pair<int, Projection>> visibleVertices(const Scene& scene, int 
             continue;
         }
         visible.emplace_back(static_cast<int>(i), projection);
+    }
+    return visible;
+}
+
+Mesh makeTexturedBox(const Vec3& min_m, const Vec3& max_m, int cells_per_axis, std::uint32_t seed) {
+    Mesh mesh;
+    const int cells = std::max(1, cells_per_axis);
+    const double dx = max_m[0] - min_m[0];
+    const double dy = max_m[1] - min_m[1];
+    const double dz = max_m[2] - min_m[2];
+
+    struct Face {
+        Vec3 origin;
+        Vec3 u;
+        Vec3 v;
+        Vec3 normal;
+        double width;
+        double height;
+    };
+
+    // Each face lists a right-handed (u, v, normal) triad so the renderer's back-face test and
+    // the texture grid agree on which side is outside.
+    const Face faces[6] = {
+        {{min_m[0], min_m[1], max_m[2]}, {1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}, dx, dy},
+        {{max_m[0], min_m[1], min_m[2]}, {-1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, -1.0}, dx, dy},
+        {{max_m[0], min_m[1], max_m[2]}, {0.0, 0.0, -1.0}, {0.0, 1.0, 0.0}, {1.0, 0.0, 0.0}, dz, dy},
+        {{min_m[0], min_m[1], min_m[2]}, {0.0, 0.0, 1.0}, {0.0, 1.0, 0.0}, {-1.0, 0.0, 0.0}, dz, dy},
+        {{min_m[0], max_m[1], min_m[2]}, {1.0, 0.0, 0.0}, {0.0, 0.0, -1.0}, {0.0, 1.0, 0.0}, dx, dz},
+        {{min_m[0], min_m[1], min_m[2]}, {1.0, 0.0, 0.0}, {0.0, 0.0, 1.0}, {0.0, -1.0, 0.0}, dx, dz},
+    };
+
+    for (int face = 0; face < 6; ++face) {
+        const Face& current = faces[face];
+        for (int i = 0; i < cells; ++i) {
+            for (int j = 0; j < cells; ++j) {
+                const double u0 = current.width * static_cast<double>(i) / cells;
+                const double u1 = current.width * static_cast<double>(i + 1) / cells;
+                const double v0 = current.height * static_cast<double>(j) / cells;
+                const double v1 = current.height * static_cast<double>(j + 1) / cells;
+                auto corner = [&current](double u, double v) {
+                    return Vec3{current.origin[0] + current.u[0] * u + current.v[0] * v,
+                                current.origin[1] + current.u[1] * u + current.v[1] * v,
+                                current.origin[2] + current.u[2] * u + current.v[2] * v};
+                };
+                const std::uint32_t hash = hashCell(face, i, j, seed);
+                const auto albedo = static_cast<std::uint8_t>(30u + hash % 190u);
+                addQuad(mesh,
+                        {corner(u0, v0), corner(u1, v0), corner(u1, v1), corner(u0, v1)},
+                        current.normal, albedo);
+            }
+        }
+    }
+    return mesh;
+}
+
+Scene makeTexturedBoxScene(
+    int ring_count,
+    double radius_m,
+    double height_m,
+    int width_px,
+    int height_px,
+    double focal_px,
+    int cells_per_axis,
+    std::uint32_t seed) {
+    Scene scene;
+    scene.mesh = makeTexturedBox({-0.35, -0.25, 0.35}, {0.35, 0.25, 0.85}, cells_per_axis, seed);
+    addRingCameras(scene, ring_count, radius_m, height_m, width_px, height_px, focal_px,
+                   {0.0, 0.0, 0.6});
+    return scene;
+}
+
+std::vector<SurfaceVertex> visibleSurfaceVertices(const Scene& scene, int camera_index) {
+    const Camera& camera = scene.cameras.at(static_cast<std::size_t>(camera_index));
+    const Vec3 eye{camera.pose_camera_to_world[3], camera.pose_camera_to_world[7],
+                   camera.pose_camera_to_world[11]};
+
+    // Ids must be stable across cameras, so number every distinct mesh position once in sorted
+    // order instead of by the order a particular view happens to encounter it.
+    std::map<std::array<long long, 3>, int> ids;
+    for (const Vertex& vertex : scene.mesh.vertices) {
+        ids.emplace(std::array<long long, 3>{
+                        std::llround(vertex.position_m[0] * 1e6),
+                        std::llround(vertex.position_m[1] * 1e6),
+                        std::llround(vertex.position_m[2] * 1e6)},
+                    0);
+    }
+    int next_id = 0;
+    for (auto& entry : ids) {
+        entry.second = next_id++;
+    }
+
+    std::vector<SurfaceVertex> visible;
+
+    for (const Triangle& triangle : scene.mesh.triangles) {
+        const Vertex& v0 = scene.mesh.vertices[static_cast<std::size_t>(triangle.vertex_index[0])];
+        const Vertex& v1 = scene.mesh.vertices[static_cast<std::size_t>(triangle.vertex_index[1])];
+        const Vertex& v2 = scene.mesh.vertices[static_cast<std::size_t>(triangle.vertex_index[2])];
+
+        const Vec3 centroid{(v0.position_m[0] + v1.position_m[0] + v2.position_m[0]) / 3.0,
+                            (v0.position_m[1] + v1.position_m[1] + v2.position_m[1]) / 3.0,
+                            (v0.position_m[2] + v1.position_m[2] + v2.position_m[2]) / 3.0};
+        if (dot(normalize(v0.normal), sub(eye, centroid)) <= 0.0) {
+            continue;  // faces away from the camera
+        }
+
+        for (const Vertex* vertex : {&v0, &v1, &v2}) {
+            const Projection projection = projectPoint(camera, vertex->position_m);
+            if (!projection.in_front || projection.u_px < 0.0 || projection.v_px < 0.0 ||
+                projection.u_px >= static_cast<double>(camera.width_px) ||
+                projection.v_px >= static_cast<double>(camera.height_px)) {
+                continue;
+            }
+
+            const std::array<long long, 3> key{
+                std::llround(vertex->position_m[0] * 1e6),
+                std::llround(vertex->position_m[1] * 1e6),
+                std::llround(vertex->position_m[2] * 1e6),
+            };
+            visible.push_back({ids.at(key), vertex->position_m, projection});
+        }
     }
     return visible;
 }

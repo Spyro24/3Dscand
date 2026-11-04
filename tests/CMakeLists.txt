@@ -26,10 +26,20 @@ FetchContent_MakeAvailable(googletest)
 # utility. Each test executable is a thin wrapper over this library.
 add_library(scand3d_test_util STATIC
     "${SCAND3D_CORE_DIR}/bridge/bridge_api.cpp"
+    "${SCAND3D_CORE_DIR}/feature/brief_descriptor.cpp"
+    "${SCAND3D_CORE_DIR}/feature/fast_detector.cpp"
+    "${SCAND3D_CORE_DIR}/feature/feature_extractor.cpp"
+    "${SCAND3D_CORE_DIR}/feature/feature_store.cpp"
+    "${SCAND3D_CORE_DIR}/feature/gray_image.cpp"
+    "${SCAND3D_CORE_DIR}/feature/matcher.cpp"
+    "${SCAND3D_CORE_DIR}/geometry/linalg.cpp"
+    "${SCAND3D_CORE_DIR}/geometry/two_view.cpp"
     "${SCAND3D_CORE_DIR}/sensors/keyframe_prior.cpp"
     "${SCAND3D_CORE_DIR}/sensors/mahony_filter.cpp"
     "${SCAND3D_CORE_DIR}/sensors/tilt_orientation.cpp"
     synthetic/synthetic_scene.cpp
+    tools/match_overlay.cpp
+    tools/pgm.cpp
 )
 target_include_directories(scand3d_test_util PUBLIC
     "${SCAND3D_CORE_DIR}"
@@ -49,6 +59,30 @@ add_executable(imu_fusion_test
 )
 target_link_libraries(imu_fusion_test PRIVATE scand3d_test_util GTest::gtest_main)
 gtest_discover_tests(imu_fusion_test)
+
+add_executable(feature_test
+    native/feature_test.cpp
+)
+target_link_libraries(feature_test PRIVATE scand3d_test_util GTest::gtest_main)
+gtest_discover_tests(feature_test)
+
+add_executable(geometry_test
+    native/geometry_test.cpp
+)
+target_link_libraries(geometry_test PRIVATE scand3d_test_util GTest::gtest_main)
+gtest_discover_tests(geometry_test)
+
+add_executable(match_tool_test
+    native/match_tool_test.cpp
+)
+target_link_libraries(match_tool_test PRIVATE scand3d_test_util GTest::gtest_main)
+gtest_discover_tests(match_tool_test)
+
+# Desktop-only debugging tool (roadmap 3.5); never part of the APK.
+add_executable(match_visualizer
+    tools/match_visualizer.cpp
+)
+target_link_libraries(match_visualizer PRIVATE scand3d_test_util)
 
 add_executable(synthetic_scene_test
     native/synthetic_scene_test.cpp
