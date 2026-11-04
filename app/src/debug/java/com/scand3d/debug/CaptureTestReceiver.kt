@@ -44,6 +44,12 @@ class CaptureTestReceiver : BroadcastReceiver() {
                 Log.i(LOG_TAG, "overlay demo ${if (enabled) "on" else "off"}")
             }
 
+            ORIENTATION -> {
+                val deg = intent.getStringExtra(VALUE)?.toIntOrNull() ?: 0
+                actions.setPreviewRotationDeg(deg)
+                Log.i(LOG_TAG, "preview rotation $deg requested")
+            }
+
             else -> Log.i(LOG_TAG, "status frames=${actions.savedFrames()}")
         }
     }
@@ -57,5 +63,6 @@ class CaptureTestReceiver : BroadcastReceiver() {
         const val LOSS = "loss"
         const val OVERLAY = "overlay"
         const val RECONSTRUCT = "reconstruct"
+        const val ORIENTATION = "orientation"
     }
 }

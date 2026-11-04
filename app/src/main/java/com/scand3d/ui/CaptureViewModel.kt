@@ -19,6 +19,7 @@ import com.scand3d.core.bridge.NativeOrientationMath
 import com.scand3d.debug.CaptureTestBridge
 import com.scand3d.reconstruct.LiveReconstruction
 import com.scand3d.reconstruct.ReconstructionRunner
+import com.scand3d.render.MonochromePreviewRenderer
 import com.scand3d.render.OverlayCameraParams
 import com.scand3d.render.OverlayFeed
 import com.scand3d.render.OverlayGeometry
@@ -175,7 +176,9 @@ class CaptureViewModel(application: Application) :
         // The keyframes are reconstructed as they arrive, so the map on screen during the scan is
         // this capture's own (roadmap 5.2) rather than something a debug command builds afterwards.
         liveReconstruction?.close()
-        liveReconstruction = LiveReconstruction(on_cloud = ::applyReconstruction)
+        liveReconstruction = LiveReconstruction(
+            on_cloud = { points, reference -> applyReconstruction(points, reference) },
+        )
         savedFrameIndex = 0
         memoryTick = 0
         _state.value = _state.value.copy(
@@ -201,6 +204,12 @@ class CaptureViewModel(application: Application) :
     }
 
     override fun savedFrames(): Int = _state.value.savedFrames
+
+    override fun setPreviewRotationDeg(deg: Int) {
+        // Debug only: the renderer reads this every frame, so the preview turns without a rebuild.
+        MonochromePreviewRenderer.quarter_turn_override = deg
+        Log.i(LOG_TAG, "preview rotation override: $deg deg")
+    }
 
     override fun setOverlayDemo(enabled: Boolean) {
         overlayDemo = enabled
@@ -272,7 +281,17 @@ class CaptureViewModel(application: Application) :
         ).start()
     }
 
-    private fun applyReconstruction(positions_m: DoubleArray) {
+    private fun applyReconstruction(
+        positions_m: DoubleArray,
+        reference_quaternion: DoubleArray? = null,
+    ) {
+        // The session's first view is the reconstruction's origin, so the overlay is anchored to
+        // the pose the phone held when that keyframe was captured, not to this moment (D043).
+        if (overlayReference == null && reference_quaternion != null &&
+            reference_quaternion.size >= 4
+        ) {
+            overlayReference = reference_quaternion
+        }
         val handle = overlayHandle.takeIf { it != 0L } ?: NativeCore.overlayCreate().also {
             overlayHandle = it
         }
@@ -288,7 +307,10 @@ class CaptureViewModel(application: Application) :
         }
         // Only the first cloud fixes the frame: re-anchoring on every live update would make the
         // cloud jump whenever the map grows.
-        val basis = overlayBasis ?: camera.rotation.also { overlayBasis = it }
+        // The cloud is in the first keyframe's camera frame and the overlay scene is the body frame
+        // at that keyframe, so the cloud takes the camera's own extrinsic and nothing else.
+        val basis = overlayBasis
+            ?: OverlayGeometry.bodyFromCamera(false, displayRotationDeg()).also { overlayBasis = it }
 
         // Colours start white and are replaced by the keyframe sample below.
         val world = toOverlayFrame(positions_m, basis)
@@ -599,6 +621,7 @@ class CaptureViewModel(application: Application) :
                 liveReconstruction?.onKeyframe(
                     File(getApplication<Application>().filesDir, path),
                     camera,
+                    frame.orientation_wxyz,
                 )
             }
         }

@@ -11,6 +11,9 @@ object CaptureTestBridge {
         fun stopCapture()
         fun savedFrames(): Int
 
+        /** Debug only: forces the preview's quarter turn for orientation calibration. */
+        fun setPreviewRotationDeg(deg: Int)
+
         /** Runs the production camera-loss path (the same callback the OS invokes). */
         fun simulateCameraLoss()
 

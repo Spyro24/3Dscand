@@ -520,6 +520,50 @@ ReconstructionReport Session::run() {
         }
     };
 
+    // Every run re-seeds from whichever pair scores best, and the seed decides the frame: its first
+    // camera is the origin. A live session runs this repeatedly on a growing view set, so the frame
+    // used to move between updates and the overlay cloud jumped away from the features it belongs to
+    // (D043). Re-expressing the result in view 0's camera frame keeps every run in one gauge.
+    auto reanchorToView = [](Reconstruction& reconstruction, int view) {
+        if (view < 0 || static_cast<std::size_t>(view) >= reconstruction.views.size()) {
+            return;
+        }
+        const ViewState& anchor = reconstruction.views[static_cast<std::size_t>(view)];
+        if (!anchor.registered) {
+            return;
+        }
+        const Mat3 rotation = geometry::transpose3(anchor.pose.rotation);
+        const Vec3 centre = anchor.pose.camera_centre_m;
+        auto transformPoint = [&](Vec3& point) {
+            const Vec3 delta{point[0] - centre[0], point[1] - centre[1], point[2] - centre[2]};
+            point = geometry::matvec3(rotation, delta);
+        };
+        auto transformRotation = [&](Mat3& pose_rotation) {
+            Mat3 out{};
+            for (int row = 0; row < 3; ++row) {
+                for (int column = 0; column < 3; ++column) {
+                    double sum = 0.0;
+                    for (int k = 0; k < 3; ++k) {
+                        sum += rotation[row * 3 + k] * pose_rotation[k * 3 + column];
+                    }
+                    out[row * 3 + column] = sum;
+                }
+            }
+            pose_rotation = out;
+        };
+
+        for (MapPoint& point : reconstruction.points) {
+            transformPoint(point.position_m);
+        }
+        for (ViewState& state : reconstruction.views) {
+            if (!state.registered) {
+                continue;
+            }
+            transformPoint(state.pose.camera_centre_m);
+            transformRotation(state.pose.rotation);
+        }
+    };
+
     struct SeedAttempt {
         const PairMatches* pair = nullptr;
         Reconstruction reconstruction;
@@ -598,6 +642,7 @@ ReconstructionReport Session::run() {
         }
     }
 
+    reanchorToView(best.reconstruction, 0);
     result_ = std::move(best);
     ran_ = result_.report.views_registered >= 2;
     return result_.report;

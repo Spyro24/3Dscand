@@ -18,12 +18,16 @@ import java.util.ArrayDeque
  * property of a scan.
  */
 class LiveReconstruction(
-    private val on_cloud: (DoubleArray) -> Unit,
+    private val on_cloud: (DoubleArray, DoubleArray?) -> Unit,
     private val min_interval_ms: Long = MIN_INTERVAL_MS,
     private val max_views: Int = MAX_VIEWS,
 ) {
 
-    private class Keyframe(val file: File, val camera: OverlayCameraParams)
+    private class Keyframe(
+        val file: File,
+        val camera: OverlayCameraParams,
+        val orientation_wxyz: DoubleArray?,
+    )
 
     private val lock = Object()
     private val pending = ArrayDeque<Keyframe>()
@@ -33,14 +37,15 @@ class LiveReconstruction(
     private var views = 0
     private var views_since_run = 0
     private var last_run_ms = 0L
+    private var reference_orientation: DoubleArray? = null
 
     /** Queues a keyframe that is already on disk; decoding and matching happen on the worker. */
-    fun onKeyframe(file: File, camera: OverlayCameraParams) {
+    fun onKeyframe(file: File, camera: OverlayCameraParams, orientation_wxyz: List<Double>?) {
         synchronized(lock) {
             if (finishing || closed) {
                 return
             }
-            pending.addLast(Keyframe(file, camera))
+            pending.addLast(Keyframe(file, camera, orientation_wxyz?.toDoubleArray()))
             lock.notifyAll()
         }
         startWorker()
@@ -146,6 +151,12 @@ class LiveReconstruction(
                         Log.w(LOG_TAG, "view rejected: ${keyframe.file.name}")
                         continue
                     }
+                    if (reference_orientation == null) {
+                        // The session's first view is the frame the map is anchored to, so the
+                        // overlay has to use the pose the phone held when that view was captured
+                        // (D043). Anything later is a different camera pose.
+                        reference_orientation = keyframe.orientation_wxyz
+                    }
                     views += 1
                     views_since_run += 1
                     added += 1
@@ -193,7 +204,7 @@ class LiveReconstruction(
                 "${elapsed} ms",
         )
         if (positions.isNotEmpty()) {
-            on_cloud(positions)
+            on_cloud(positions, reference_orientation)
         }
     }
 

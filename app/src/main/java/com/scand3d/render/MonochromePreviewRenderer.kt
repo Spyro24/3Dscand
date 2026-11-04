@@ -56,6 +56,11 @@ class MonochromePreviewRenderer(
     /// xy is the sampled fraction of the image, zw its offset; the preview fills its box by
     /// cropping the image to the box's aspect instead of letterboxing it (D041).
     private val crop = FloatArray(4) { if (it < 2) 1f else 0f }
+    private var logged_geometry = false
+    private var logged_matrix = false
+    private var matrix_seen = false
+    private var transform_transposes = false
+    private var overlay_turn = 0f
     private var overlayBuffer: FloatBuffer? = null
     private var overlayVertexCount = 0
     private var pendingOverlay: FloatArray? = null
@@ -109,6 +114,7 @@ class MonochromePreviewRenderer(
         viewportWidthPx = width.coerceAtLeast(1)
         viewportHeightPx = height.coerceAtLeast(1)
         GLES20.glViewport(0, 0, viewportWidthPx, viewportHeightPx)
+        Log.i(LOG_TAG, "preview surface ${viewportWidthPx}x$viewportHeightPx")
     }
 
     override fun onDrawFrame(gl: GL10?) {
@@ -118,16 +124,40 @@ class MonochromePreviewRenderer(
                 texture.updateTexImage()
                 texture.getTransformMatrix(textureMatrix)
                 frameAvailable = false
+                if (!matrix_seen) {
+                    matrix_seen = true
+                    // A transpose (u,v) -> (1-v, 1-u) means the camera stores its preview buffer
+                    // rotated, so the texture transform already delivers it upright (D042).
+                    transform_transposes = Math.abs(textureMatrix[0]) < 0.5f &&
+                        Math.abs(textureMatrix[1]) > 0.5f
+                    Log.i(LOG_TAG, "texture transform transposes: $transform_transposes")
+                }
+                if (!logged_matrix) {
+                    logged_matrix = true
+                    Log.i(
+                        LOG_TAG,
+                        "texture matrix " + textureMatrix.joinToString(",") {
+                            String.format(java.util.Locale.US, "%.2f", it)
+                        },
+                    )
+                }
             }
         }
 
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
+        // The preview is not rotated on top of the camera's own transform. The overlay, however,
+        // is projected in the untransposed image frame, so it takes that transpose as one quarter
+        // turn; otherwise every point lands a quarter turn away from its feature.
+        val forced = quarter_turn_override?.let { (((it % 360) + 360) % 360 / 90).toFloat() }
+        val previewTurn = forced ?: if (transform_transposes) 0f else quarterTurns
+        overlay_turn = (previewTurn + (if (transform_transposes) 1f else 0f)) % 4f
+
         // The preview fills its box: the upright image is cropped to the box's aspect rather than
         // letterboxed into it, which is what a camera app shows and what the reference layout
         // needs (D041). A quarter turn swaps the image's edges before the aspect is compared.
-        val swapsEdges = quarterTurns == 1f || quarterTurns == 3f
+        val swapsEdges = transform_transposes.xor(previewTurn == 1f || previewTurn == 3f)
         val displayWidthPx = if (swapsEdges) textureHeightPx else textureWidthPx
         val displayHeightPx = if (swapsEdges) textureWidthPx else textureHeightPx
         val viewAspect = viewportWidthPx.toFloat() / viewportHeightPx.toFloat()
@@ -138,6 +168,19 @@ class MonochromePreviewRenderer(
         crop[1] = cropY
         crop[2] = (1f - cropX) / 2f
         crop[3] = (1f - cropY) / 2f
+        if (!logged_geometry) {
+            logged_geometry = true
+            Log.i(
+                LOG_TAG,
+                "texture matrix " + textureMatrix.joinToString(",") { String.format(java.util.Locale.US, "%.3f", it) },
+            )
+            Log.i(
+                LOG_TAG,
+                "preview: image ${displayWidthPx}x$displayHeightPx turned $quarterTurns, " +
+                    "surface ${viewportWidthPx}x$viewportHeightPx, " +
+                    "crop ${cropX}x$cropY",
+            )
+        }
         GLES20.glViewport(0, 0, viewportWidthPx, viewportHeightPx)
 
         GLES20.glUseProgram(program)
@@ -145,7 +188,7 @@ class MonochromePreviewRenderer(
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
         GLES20.glUniform1i(textureHandle, 0)
         GLES20.glUniformMatrix4fv(matrixHandle, 1, false, textureMatrix, 0)
-        GLES20.glUniform1f(rotationHandle, quarterTurns)
+        GLES20.glUniform1f(rotationHandle, previewTurn)
         GLES20.glUniform4fv(cropHandle, 1, crop, 0)
 
         GLES20.glEnableVertexAttribArray(positionHandle)
@@ -203,7 +246,7 @@ class MonochromePreviewRenderer(
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
         GLES20.glUniform1f(pointOpacityHandle, overlayOpacity)
         GLES20.glUniform1f(pointSizeHandle, OVERLAY_POINT_SIZE_PX)
-        GLES20.glUniform1f(pointRotationHandle, quarterTurns)
+        GLES20.glUniform1f(pointRotationHandle, overlay_turn)
         GLES20.glUniform4fv(pointCropHandle, 1, crop, 0)
 
         GLES20.glEnableVertexAttribArray(pointPositionHandle)
@@ -237,7 +280,11 @@ class MonochromePreviewRenderer(
         requestRender?.invoke()
     }
 
-    private companion object {
+    companion object {
+        /** Debug only: quarter turn override, in degrees, for on-device orientation calibration. */
+        @Volatile
+        var quarter_turn_override: Int? = null
+
         const val LOG_TAG = "MonochromePreview"
         const val OVERLAY_VERTEX_FLOATS = 5
         const val OVERLAY_STRIDE_BYTES = OVERLAY_VERTEX_FLOATS * 4
@@ -270,11 +317,11 @@ class MonochromePreviewRenderer(
                 vec2 uv = (uTexMatrix * aTexCoord).xy;
                 float quarter = floor(uRotation + 0.5);
                 if (quarter > 2.5) {
-                    uv = vec2(uv.y, 1.0 - uv.x);
+                    uv = vec2(1.0 - uv.y, uv.x);
                 } else if (quarter > 1.5) {
                     uv = vec2(1.0 - uv.x, 1.0 - uv.y);
                 } else if (quarter > 0.5) {
-                    uv = vec2(1.0 - uv.y, uv.x);
+                    uv = vec2(uv.y, 1.0 - uv.x);
                 }
                 vTexCoord = uCrop.zw + uv * uCrop.xy;
             }
@@ -294,11 +341,11 @@ class MonochromePreviewRenderer(
                 vec2 p = aPosition;
                 float quarter = floor(uRotation + 0.5);
                 if (quarter > 2.5) {
-                    p = vec2(-p.y, p.x);
+                    p = vec2(p.y, -p.x);
                 } else if (quarter > 1.5) {
                     p = -p;
                 } else if (quarter > 0.5) {
-                    p = vec2(p.y, -p.x);
+                    p = vec2(-p.y, p.x);
                 }
                 gl_Position = vec4(p / uCrop.xy, 0.0, 1.0);
                 gl_PointSize = uPointSize;

@@ -252,7 +252,7 @@ private fun StatusLine(state: CaptureUiState, modifier: Modifier = Modifier) {
 @Composable
 private fun ControlStrip(state: CaptureUiState, onOverlayEnabledChange: (Boolean) -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 34.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 30.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -362,7 +362,7 @@ private fun CaptureControls(state: CaptureUiState, onToggleCapture: () -> Unit) 
     )
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 34.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 30.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -389,7 +389,7 @@ private fun GalleryTile(frames: Int) {
     val description = stringResource(R.string.capture_gallery_description)
     Box(
         modifier = Modifier
-            .size(52.dp)
+            .size(46.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(PANEL_COLOR)
             .semantics { contentDescription = description },
@@ -439,7 +439,7 @@ private fun ShutterButton(
 ) {
     Box(
         modifier = Modifier
-            .size(76.dp)
+            .size(66.dp)
             .clip(CircleShape)
             .border(4.dp, if (enabled) Color.White else Color(0x66FFFFFF), CircleShape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onToggleCapture)
@@ -448,7 +448,7 @@ private fun ShutterButton(
     ) {
         Box(
             modifier = Modifier
-                .size(if (capturing) 32.dp else 56.dp)
+                .size(if (capturing) 28.dp else 48.dp)
                 .clip(if (capturing) RoundedCornerShape(7.dp) else CircleShape)
                 .background(if (enabled) SHUTTER_COLOR else Color(0x44FFFFFF)),
         )
@@ -491,7 +491,7 @@ private fun ModeTabs() {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
+            .padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -509,17 +509,17 @@ private fun TabLabel(text: String, active: Boolean) {
             modifier = Modifier
                 .clip(CircleShape)
                 .background(PILL_COLOR)
-                .padding(horizontal = 18.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 6.dp),
         ) {
-            Text(text = text, color = Color.White, fontSize = 13.sp, letterSpacing = 1.sp)
+            Text(text = text, color = Color.White, fontSize = 12.sp, letterSpacing = 1.sp)
         }
     } else {
         Text(
             text = text,
             color = Color(0x59FFFFFF),
-            fontSize = 13.sp,
+            fontSize = 12.sp,
             letterSpacing = 1.sp,
-            modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
         )
     }
 }

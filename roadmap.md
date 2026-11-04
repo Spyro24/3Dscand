@@ -164,7 +164,9 @@ the camera writes is decoded and added to a live session, which re-runs the spar
 at most every 1.5 s and redraws the overlay from it (D039). A 22 s capture on the SM-G930F reached
 eight views at 0.6-3 s per update, and all of its points projected into the preview. The view cap is
 eight because every update re-matches every pair; a full scan needs the pair cache that turns the
-loop incremental.
+loop incremental. Each run is re-expressed in the first keyframe's frame (D043), so the cloud keeps its place
+on the scene as the map grows, and the preview follows the camera's own texture transform
+instead of the sensor angle (D042).
 
 5.3 is implemented natively: `overlay::samplePointColors` takes the per-channel median of a 3x3
 keyframe patch around each point's projection, and `KeyframeColorSampler` decodes the newest saved

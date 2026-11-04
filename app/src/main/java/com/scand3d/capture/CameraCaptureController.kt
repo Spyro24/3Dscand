@@ -339,7 +339,13 @@ class CameraCaptureController(
     }
 
     private fun choosePreviewSize(sizes: Array<Size>): Size {
-        // 1280x720 keeps the texture small enough for 30 fps while staying representative.
+        // A 4:3 stream matches the stills and the scan's field of view, and turning it upright then
+        // cropping it to the preview box costs about 14% of the height; a 16:9 stream loses a third
+        // of it, which reads as a zoomed, stretched preview (D042).
+        sizes.firstOrNull { it.width == 1280 && it.height == 960 }?.let { return it }
+        sizes.filter { it.width * 3 == it.height * 4 && it.width <= 1440 }
+            .maxByOrNull { it.width * it.height }
+            ?.let { return it }
         sizes.firstOrNull { it.width == 1280 && it.height == 720 }?.let { return it }
         return sizes.filter { it.width <= 1920 }.maxByOrNull { it.width * it.height } ?: sizes.first()
     }

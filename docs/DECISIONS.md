@@ -536,3 +536,36 @@ here with its version, license and reason (agents.md sections 2 and 7).
   during a capture 123 of 123 points project over the live image. PHOTO and VIDEO tabs and the flip
   glyph are drawn dimmed and are not interactive, because the app scans only and has one camera; the
   focus square is a lock indicator, not a control, so it never invites a tap it cannot honour.
+
+### D042 - The preview follows the camera's own texture transform, not the sensor angle
+- **Decision:** the preview renderer reads the SurfaceTexture transform and treats a transposing
+  matrix, `(u,v) -> (1-v, 1-u)`, as the orientation the camera already delivers: the preview gets no
+  extra rotation, the displayed aspect uses the transposed dimensions, and the overlay points take
+  exactly that one quarter turn, because they are projected in the untransposed image frame. The
+  preview stream is 4:3 (1280x960, else the closest 4:3), and a debug broadcast
+  `orientation <deg>` forces a quarter turn so the orientation can be calibrated on a device.
+- **Reason:** D041 rotated the preview by the sensor orientation, which on the SM-G930F turned an
+  already-upright image 90 degrees sideways: its preview buffer arrives transposed, and the
+  transform carries that. Forcing each of the four rotations on the device and comparing the screen
+  with a captured still showed 0 degrees is upright and the other three are sideways or inverted.
+  The 16:9 preview stream also forced a 35% vertical crop, which read as a stretched preview.
+- **Consequence:** the preview is upright and only about 14% cropped (crop 1.0x0.86 logged on
+  device), and the cloud lands on the same features it is drawn over. Devices whose transform does
+  not transpose still follow the sensor angle and remain untested; the debug override exists so the
+  next device can be calibrated in one broadcast rather than a rebuild.
+
+### D043 - Anchor every reconstruction run to the first keyframe
+- **Decision:** `Session::run` re-expresses its result in view 0's camera frame after growth and
+  bundle adjustment: points and camera poses are rotated and translated so the first view sits at the
+  origin with an identity rotation. The app anchors the overlay to the IMU pose of the keyframe that
+  became view 0, and pre-rotates the cloud by the camera's own body extrinsic. A native test
+  (`Session.KeepsEveryRunAnchoredToTheFirstView`) asserts camera 0 is the identity in two successive
+  runs and that the map keeps its scale.
+- **Reason:** each run re-seeds from whichever pair matches best (D037), and the seed pair's first
+  camera becomes the frame origin, so on a growing view set the gauge changed between live updates.
+  The cloud therefore changed pose and size while the phone and the scene stood still. The overlay
+  also anchored itself to the pose at the moment the first cloud arrived rather than at the keyframe
+  the map is built from, which added a constant rotation error.
+- **Consequence:** successive live updates share one gauge, so a cloud drawn on a feature stays on
+  it as the map grows and as the phone turns. Scale remains free (D028) and is still normalised for
+  display, and the anchor is only taken once per capture.

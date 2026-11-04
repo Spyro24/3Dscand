@@ -323,3 +323,76 @@ TEST(Session, TracksAViewAgainstTheMap) {
                                    0.5 * kHeightPx, blank_pose, blank_inliers));
     EXPECT_EQ(blank_inliers, 0);
 }
+
+// The live session re-runs the map every time a keyframe arrives, and each run re-seeds from
+// whichever pair matches best. The seed decides the frame, so before D043 the cloud jumped to a new
+// pose between updates instead of staying on its features. Anchoring every run to view 0 fixes that.
+TEST(Session, KeepsEveryRunAnchoredToTheFirstView) {
+    const syn::Scene scene = renderScene(20261104u);
+    scand3d::sfm::Session session = makeSession();
+    ASSERT_GE(addRing(session, scene, 3), 3);
+
+    const scand3d::sfm::ReconstructionReport first = session.run();
+    ASSERT_GE(first.views_registered, 2);
+    EXPECT_GT(first.points, 0);
+
+    double rotation[9] = {};
+    double centre[3] = {};
+    ASSERT_TRUE(session.copyCamera(0, rotation, centre));
+    for (int axis = 0; axis < 3; ++axis) {
+        EXPECT_NEAR(centre[axis], 0.0, 1e-9);
+    }
+    for (int index = 0; index < 9; ++index) {
+        EXPECT_NEAR(rotation[index], index % 4 == 0 ? 1.0 : 0.0, 1e-9);
+    }
+
+    const int point_capacity = session.pointCount();
+    ASSERT_GT(point_capacity, 0);
+    std::vector<double> before(static_cast<std::size_t>(point_capacity) * 3);
+    ASSERT_GT(session.copyPoints(before.data(), point_capacity), 0);
+
+    const int next_view = 3;
+    const syn::Image image = syn::render(scene, next_view);
+    const syn::Camera& camera = scene.cameras[static_cast<std::size_t>(next_view)];
+    ASSERT_GE(session.addView(image.width_px, image.height_px, image.pixels.data(),
+                              camera.focal_px, camera.cx_px, camera.cy_px),
+              0);
+
+    const scand3d::sfm::ReconstructionReport second = session.run();
+    ASSERT_GE(second.views_registered, 2);
+    EXPECT_GT(second.points, 0);
+
+    ASSERT_TRUE(session.copyCamera(0, rotation, centre));
+    for (int axis = 0; axis < 3; ++axis) {
+        EXPECT_NEAR(centre[axis], 0.0, 1e-9);
+    }
+    for (int index = 0; index < 9; ++index) {
+        EXPECT_NEAR(rotation[index], index % 4 == 0 ? 1.0 : 0.0, 1e-9);
+    }
+
+    const int after_capacity = session.pointCount();
+    ASSERT_GT(after_capacity, 0);
+    std::vector<double> after(static_cast<std::size_t>(after_capacity) * 3);
+    ASSERT_GT(session.copyPoints(after.data(), after_capacity), 0);
+
+    auto mean_distance = [](const std::vector<double>& points) {
+        if (points.size() < 3) {
+            return 0.0;
+        }
+        double sum = 0.0;
+        std::size_t count = 0;
+        for (std::size_t index = 0; index + 2 < points.size(); index += 3) {
+            const double x = points[index];
+            const double y = points[index + 1];
+            const double z = points[index + 2];
+            sum += std::sqrt(x * x + y * y + z * z);
+            ++count;
+        }
+        return count == 0 ? 0.0 : sum / static_cast<double>(count);
+    };
+    const double before_mean = mean_distance(before);
+    const double after_mean = mean_distance(after);
+    ASSERT_GT(before_mean, 0.0);
+    EXPECT_LT(after_mean, 2.0 * before_mean);
+    EXPECT_GT(after_mean, 0.5 * before_mean);
+}

@@ -260,3 +260,8 @@ a saved session through `sfm::Session` and load it into the overlay, but only th
   reconstructs reliably on synthetic data, so the overlay's default content is still the debug cloud. 5.5 is open and the whole
   phase stays unaccepted until a real cloud exists (D031-D036).
 - Phases 6 and later are unimplemented; `roadmap.md` is the source of truth.
+
+The preview is drawn in whatever orientation the camera's texture transform delivers: on the
+SM-G930F that transform transposes the buffer, so the preview takes no extra rotation while the
+overlay points take one quarter turn (D042). Rotating on the sensor angle as well was what made the
+preview appear sideways.
