@@ -15,7 +15,7 @@ Goal: an empty app that builds, runs native code and runs tests.
 - [x] 0.4 Test harness: gtest for C++, JUnit for Kotlin, both run locally (CI wiring deferred to 12.1)
 - [x] 0.5 Synthetic scene generator (known mesh, simulated cameras) as a test utility
 - [x] 0.6 Benchmark logger (frame times, memory, thermal state) writing to `docs/benchmarks/`
-- [ ] 0.7 `DECISIONS.md` and `docs/architecture.md` created
+- [x] 0.7 `DECISIONS.md` and `docs/architecture.md` created
 
 **Acceptance:** APK builds with `assembleDebug` (CI runs only at public release, see 12.1), native
 library loads on the connected test device, all unit tests pass.
