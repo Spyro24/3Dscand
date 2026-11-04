@@ -17,3 +17,7 @@ local.properties
 # Native builds
 *.o
 *.so.tmp
+
+# Python bytecode (tools/blender)
+__pycache__/
+*.pyc

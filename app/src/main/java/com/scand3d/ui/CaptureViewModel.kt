@@ -17,6 +17,7 @@ import com.scand3d.capture.SessionStore
 import com.scand3d.core.bridge.NativeCore
 import com.scand3d.core.bridge.NativeOrientationMath
 import com.scand3d.debug.CaptureTestBridge
+import com.scand3d.reconstruct.CloudPlyWriter
 import com.scand3d.reconstruct.LiveReconstruction
 import com.scand3d.reconstruct.ReconstructionRunner
 import com.scand3d.render.MonochromePreviewRenderer
@@ -285,6 +286,10 @@ class CaptureViewModel(application: Application) :
         positions_m: DoubleArray,
         reference_quaternion: DoubleArray? = null,
     ) {
+        // The Blender add-on polls this file over adb (tools/blender, D044). It is written before
+        // the overlay work so a viewer still gets the map when the preview is not running.
+        publishCloudForStream(positions_m)
+
         // The session's first view is the reconstruction's origin, so the overlay is anchored to
         // the pose the phone held when that keyframe was captured, not to this moment (D043).
         if (overlayReference == null && reference_quaternion != null &&
@@ -325,6 +330,21 @@ class CaptureViewModel(application: Application) :
         sampleKeyframeColors()
         val vertices = publishOverlay()
         Log.i(LOG_TAG, "reconstruct: $vertices of $overlayPointCount points project into the preview")
+    }
+
+    /**
+     * Writes the live sparse map where the Blender add-on can poll it (tools/blender, D044). The
+     * points stay in the reconstruction's frame; converting them for display is the viewer's job.
+     */
+    private fun publishCloudForStream(positions_m: DoubleArray) {
+        val relative = _state.value.sessionRelativePath ?: return
+        val file = File(
+            File(getApplication<Application>().filesDir, relative),
+            CloudPlyWriter.FILE_NAME,
+        )
+        if (!CloudPlyWriter.write(file, positions_m)) {
+            Log.w(LOG_TAG, "cloud stream file write failed: $relative/${CloudPlyWriter.FILE_NAME}")
+        }
     }
 
     /**

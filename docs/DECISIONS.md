@@ -569,3 +569,33 @@ here with its version, license and reason (agents.md sections 2 and 7).
 - **Consequence:** successive live updates share one gauge, so a cloud drawn on a feature stays on
   it as the map grows and as the phone turns. Scale remains free (D028) and is still normalised for
   display, and the anchor is only taken once per capture.
+
+### D044 - The live cloud leaves the phone as a PLY file that Blender 4.x polls over adb
+- **Decision:** every live update writes the sparse map to `files/sessions/<stamp>/cloud.ply` in the
+  app's own files directory: a binary little-endian PLY with `x`, `y`, `z` per point in the
+  reconstruction's frame (first keyframe camera, free scale), written to a temporary file and
+  renamed over the target. `tools/blender/scand3d_stream.py` is a Blender 4.0+ add-on that polls
+  that file - through `adb exec-out run-as com.scand3d cat`, newest session by default, or from a
+  local PLY - turns it into one mesh object with a geometry-nodes modifier that instances a small
+  ico sphere per point, converts the axes to Blender's Z-up frame, and normalises the median point
+  distance to a target size.
+- **Reason:** agents.md forbids network calls during capture, so the transport is the existing USB
+  adb connection rather than a socket; a file that is rewritten at each update keeps the app and
+  the viewer independent, and needs no server, no new dependency and no bridge change. The viewer
+  is an add-on script, not app code, so the sparse map is reachable from a desktop without waiting
+  for the Phase 9 exporters. Polling (not push) keeps the phone side to a few lines and works with
+  a scan that is already running.
+- **Verified:** `blender --background --factory-startup --python tools/blender/selftest.py` passes
+  19 checks on Blender 4.0.2 with no phone attached: the PLY reader (binary, ascii with reordered
+  properties, truncated and non-PLY bodies), axis conversion and normalisation, the mesh object,
+  instances, material and view camera, session selection and fetching through a stand-in `adb`
+  executable, the streaming worker, and a Cycles frame with the cloud as the only object. Three JVM
+  cases cover the writer's header, byte layout, empty cloud and rewrite.
+- **Not verified:** the device leg never ran, because no phone was connected in this pass, so the
+  `run-as` read on real hardware, the session listing and the live growth in Blender are untested
+  against a scan. The stream carries no colour either: the overlay's sampled colours live in the
+  native scene and reading them back needs a bridge call, which is a public-interface change and
+  was not made (agents.md rule 5). Points are therefore drawn in one configurable colour.
+- **Consequence:** the add-on shows geometry only, and its PLY reader accepts any `x`/`y`/`z`
+  point PLY, so a hand-pulled or Phase 9 cloud opens the same way. A future colour or tracking-pose
+  stream extends the file format, not the transport.

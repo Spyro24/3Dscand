@@ -235,8 +235,17 @@ Goal: export one object in standard formats.
 - [ ] 9.4 Single-object export: only the selected object, with its scale in meters
 - [ ] 9.5 Share sheet and Storage Access Framework save location
 - [ ] 9.6 Export validation (file opens and reloads without errors)
+- [x] 9.7 Blender 4.x add-on that streams the live sparse map over adb (`tools/blender/`, D044)
 
 **Acceptance:** exported OBJ and GLB open in Blender and a glTF viewer with correct texture and scale.
+
+**Status:** 9.7 is done ahead of the exporters it sits next to. The live map is written to
+`files/sessions/<stamp>/cloud.ply` on every reconstruction update, and the add-on polls it over adb,
+converts the axes and normalises the size into a point-cloud object Blender renders. Verified
+headless in Blender 4.0.2 against a fixture cloud and a stand-in `adb` (`tools/blender/selftest.py`,
+19 checks, including a render); not verified against a phone, which was not attached. The stream
+carries positions only - colour would need a bridge read-back that agents.md rule 5 reserves for an
+explicit decision (D044).
 
 ---
 
