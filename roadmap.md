@@ -25,12 +25,12 @@ library loads on the connected test device, all unit tests pass.
 ## Phase 1 - Capture
 Goal: a stable camera session with a monochrome live preview and saved photos.
 
-- [ ] 1.1 Camera2 session with preview and full-resolution still capture
-- [ ] 1.2 Lock auto-exposure, auto-white-balance and focus after warm-up
-- [ ] 1.3 Frame ring buffer with timestamp, exposure, ISO and focus metadata
-- [ ] 1.4 Monochrome preview shader (luminance only)
-- [ ] 1.5 Save frames as JPEG with EXIF and a session manifest (relative paths only)
-- [ ] 1.6 Lost-camera and permission-denied handling
+- [x] 1.1 Camera2 session with preview and full-resolution still capture
+- [x] 1.2 Lock auto-exposure, auto-white-balance and focus after warm-up
+- [x] 1.3 Frame ring buffer with timestamp, exposure, ISO and focus metadata
+- [x] 1.4 Monochrome preview shader (luminance only)
+- [x] 1.5 Save frames as JPEG with EXIF and a session manifest (relative paths only)
+- [x] 1.6 Lost-camera and permission-denied handling
 
 **Acceptance:** preview runs at 30 fps or more on the target device; 100 frames saved with correct metadata; preview is strictly grayscale.
 

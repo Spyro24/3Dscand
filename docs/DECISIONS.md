@@ -103,3 +103,32 @@ here with its version, license and reason (agents.md sections 2 and 7).
 - **Consequence:** The turntable object is two stacked, offset boxes with two albedo values - no
   symmetry, so a pose estimate cannot be ambiguous. Rendering is z-buffered with back-face
   rejection and Lambert shading, and is fully deterministic for pixel-exact assertions.
+
+### D013 - Capture, preview and session storage live in Kotlin
+- **Reason:** agents.md splits Kotlin (UI and app shell) from C++ (reconstruction core, image
+  processing, rendering) but Camera2, SensorManager, EGL and file storage are Android platform
+  APIs. Calling them through JNI would add a bridge for no benefit, so capture stays Kotlin under
+  `app/.../capture/` and `app/.../render/`, and C++ keeps the algorithms.
+- **Consequence:** `core/bridge/` stays as small as possible; nothing in Kotlin touches camera
+  state from the UI thread.
+
+### D014 - Monochrome preview through a GL external-texture shader
+- **Reason:** Roadmap 1.4 asks for a luminance-only preview. Camera2 feeds a `SurfaceTexture`
+  (external OES) and the fragment shader collapses RGB to luminance, so no colour reaches the
+  screen; saved stills stay colour JPEGs because reconstruction needs them.
+- **Consequence:** Preview is letterboxed to the camera aspect ratio; draw calls happen only when
+  the camera delivers a frame (`RENDERMODE_WHEN_DIRTY`).
+
+### D015 - EXIF via `android.media.ExifInterface`, focus distance in the manifest only
+- **Reason:** The platform `ExifInterface` writes exposure time, ISO and capture time without a
+  new dependency, keeping a frame readable on its own. EXIF has no field for lens focus distance,
+  so the full photometric set is always written to `session.json`.
+- **Consequence:** `DateTime` is the wall clock at capture, not the sensor timestamp, because
+  `SENSOR_TIMESTAMP` is boot-relative.
+
+### D016 - Debug-only broadcast trigger for device tests
+- **Reason:** Driving capture through screen taps was unreliable on the test device. A receiver in
+  the `debug` source set (`com.scand3d.debug.CaptureTestReceiver`, explicit component broadcast)
+  starts and stops capture deterministically. It is not part of a release build.
+- **Consequence:** Verification commands target the receiver by component; release builds expose
+  no extra entry point.

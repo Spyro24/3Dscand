@@ -2,6 +2,21 @@
 <resources>
     <string name="app_name">3D Scan</string>
     <string name="state_idle">Idle</string>
-    <string name="native_core_loaded">native core %1$s</string>
-    <string name="native_core_missing">native core unavailable</string>
+
+    <string name="capture_action_start">Start capture</string>
+    <string name="capture_action_stop">Stop capture</string>
+    <string name="capture_action_retry">Retry</string>
+    <string name="capture_action_settings">Open settings</string>
+
+    <string name="capture_status_starting">Starting camera…</string>
+    <string name="capture_status_warming">Warming up…</string>
+    <string name="capture_status_locked">Exposure and focus locked</string>
+    <string name="capture_status_fps">%1$.0f fps</string>
+    <string name="capture_status_frames">%1$d frames</string>
+    <string name="capture_locked_values">%1$.1f ms · ISO %2$d</string>
+
+    <string name="permission_denied_title">Camera access denied</string>
+    <string name="permission_denied_body">Allow camera access in the system settings to start a scan.</string>
+    <string name="camera_lost_title">Camera unavailable</string>
+    <string name="camera_failed_title">Camera could not start</string>
 </resources>

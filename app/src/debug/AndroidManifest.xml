@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Debug-only instrumentation hook; never part of a release build. -->
+    <application>
+        <receiver
+            android:name=".debug.CaptureTestReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.scand3d.debug.CAPTURE" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>
