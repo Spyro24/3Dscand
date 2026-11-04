@@ -241,9 +241,10 @@ Goal: export one object in standard formats.
 
 **Status:** 9.7 is done ahead of the exporters it sits next to. The live map is written to
 `files/sessions/<stamp>/cloud.ply` on every reconstruction update, and the add-on polls it over adb,
-converts the axes and normalises the size into a point-cloud object Blender renders. Verified
-headless in Blender 4.0.2 against a fixture cloud and a stand-in `adb` (`tools/blender/selftest.py`,
-19 checks, including a render); not verified against a phone, which was not attached. The stream
+converts the axes and normalises the size into a point-cloud object Blender renders in the viewport,
+Eevee and Cycles. Verified headless in Blender 4.0.2 (`tools/blender/selftest.py`, 21 checks,
+including a render) and on the SM-G930F: a debug capture streamed `5 points` and then 56 points into
+the running Blender GUI, matching the file's own vertex count (8 views, 4 registered). The stream
 carries positions only - colour would need a bridge read-back that agents.md rule 5 reserves for an
 explicit decision (D044).
 

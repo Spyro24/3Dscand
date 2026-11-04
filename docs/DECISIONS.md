@@ -586,16 +586,23 @@ here with its version, license and reason (agents.md sections 2 and 7).
   for the Phase 9 exporters. Polling (not push) keeps the phone side to a few lines and works with
   a scan that is already running.
 - **Verified:** `blender --background --factory-startup --python tools/blender/selftest.py` passes
-  19 checks on Blender 4.0.2 with no phone attached: the PLY reader (binary, ascii with reordered
-  properties, truncated and non-PLY bodies), axis conversion and normalisation, the mesh object,
-  instances, material and view camera, session selection and fetching through a stand-in `adb`
-  executable, the streaming worker, and a Cycles frame with the cloud as the only object. Three JVM
-  cases cover the writer's header, byte layout, empty cloud and rewrite.
-- **Not verified:** the device leg never ran, because no phone was connected in this pass, so the
-  `run-as` read on real hardware, the session listing and the live growth in Blender are untested
-  against a scan. The stream carries no colour either: the overlay's sampled colours live in the
-  native scene and reading them back needs a bridge call, which is a public-interface change and
-  was not made (agents.md rule 5). Points are therefore drawn in one configurable colour.
+  21 checks on Blender 4.0.2: the PLY reader (binary, ascii with reordered properties, truncated and
+  non-PLY bodies), axis conversion and normalisation, the mesh object, instances, material and view
+  camera, session selection and fetching through a stand-in `adb` executable, following a newer
+  session without a pinned name, the streaming worker, and a Cycles frame with the cloud as the only
+  object. Three JVM cases cover the writer's header, byte layout, empty cloud and rewrite.
+- **Verified on the SM-G930F (2026-11-04):** the add-on read a cloud from the phone's real session
+  directory over `adb exec-out run-as` - a 12-point fixture placed at the app's path arrived as 12
+  vertices and 12 instanced spheres - and then the app's own live map, with a debug capture running:
+  Blender showed `5 points from 20261104-191410`, grew to 56 points on the next update, and the file
+  read back `element vertex 56` (the app logged 8 views, 4 registered). The GUI polls once a second.
+- **Fixed while verifying:** with the session field empty the add-on resolved the newest session once
+  and kept it while its file existed, so a restarted scan kept streaming the finished one; it now
+  re-resolves on every poll, at the cost of one extra `adb` listing per interval. An empty cloud (a
+  scan that has not seeded yet) shows as "waiting for the first points" instead of an error.
+- **Not verified:** the stream carries no colour: the overlay's sampled colours live in the native
+  scene and reading them back needs a bridge call, which is a public-interface change and was not
+  made (agents.md rule 5). Points are therefore drawn in one configurable colour.
 - **Consequence:** the add-on shows geometry only, and its PLY reader accepts any `x`/`y`/`z`
   point PLY, so a hand-pulled or Phase 9 cloud opens the same way. A future colour or tracking-pose
   stream extends the file format, not the transport.

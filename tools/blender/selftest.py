@@ -208,6 +208,14 @@ def main():
     result = bpy.ops.scand3d.fetch_once()
     check(result == {"FINISHED"}, "an explicitly named session is used")
 
+    # A restarted capture is a new directory: with no session pinned, the next poll has to follow it
+    # instead of staying on the finished scan.
+    settings.session = ""
+    write_fake_adb(fake_adb, ply_path, ["20261104-101010", "20261104-120000", "20261104-130000"])
+    result = bpy.ops.scand3d.fetch_once()
+    check(result == {"FINISHED"}, "a newer session is picked up on the next poll")
+    check("20261104-130000" in settings.status, "the newest session wins without a pinned name")
+
     # Streaming: start the worker, then drive the timer by hand because Blender runs no timers
     # without an event loop in the background.
     settings.session = ""

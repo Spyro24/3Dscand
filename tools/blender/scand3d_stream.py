@@ -233,7 +233,6 @@ class CloudStream(threading.Thread):
         self._error = None
         self._pending = False
         self._label = ""
-        self._resolved_session = ""
 
     def stop(self):
         self._stop_event.set()
@@ -275,16 +274,9 @@ class CloudStream(threading.Thread):
         serial = self._settings["serial"]
         session = self._settings["session"].strip()
         if not session:
-            if self._resolved_session:
-                try:
-                    data = _read_device_cloud(adb_path, serial, self._resolved_session)
-                except StreamError:
-                    # The scan was restarted and its directory is gone; pick the new newest one.
-                    self._resolved_session = ""
-                else:
-                    return parse_ply(data), self._resolved_session
-            self._resolved_session = latest_session(adb_path, serial)
-            session = self._resolved_session
+            # "Newest" has to mean the newest scan on every poll: restarting a capture creates a
+            # new session directory, and a cached name would keep streaming the finished one.
+            session = latest_session(adb_path, serial)
         return parse_ply(_read_device_cloud(adb_path, serial, session)), session
 
 
@@ -629,7 +621,12 @@ def timer_tick():
 
     points, error, label, changed = stream.take()
     if changed:
-        if error is None and points is not None:
+        if error is None and points is not None and not points:
+            # A capture that has not registered a seed yet writes an empty cloud; that is the start
+            # of a scan, not a failure.
+            props.status = "waiting for the first points (%s)" % label
+            props.last_error = ""
+        elif error is None and points is not None:
             try:
                 apply_points(scene, points, props)
             except StreamError as exc:
