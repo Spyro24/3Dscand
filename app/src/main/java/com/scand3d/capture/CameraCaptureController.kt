@@ -559,9 +559,12 @@ class CameraCaptureController(
                 }
 
                 // A still that was already in flight when capture stopped reaches disk after the
-                // stop flush; rewrite the manifest so it lists every frame a reader can find.
+                // stop flush; rewrite the manifest so it lists every frame a reader can find. It
+                // must go through flushManifest: a bare writeManifest() drops the session metadata
+                // and the clock/imu blocks, which made the last frame's session unreadable for
+                // Phase 2's acceptance.
                 if (!capturing.get()) {
-                    store.writeManifest(lockedSettings, android.os.Build.MODEL)
+                    flushManifest(shutdownWriter = false)
                 }
 
                 if (capturing.get()) {
