@@ -778,6 +778,30 @@ int Session::copyPoints(double* positions_m, int max_points) const {
     return written;
 }
 
+int Session::copyKeyframeIds(int* out_ids, int max_ids) const {
+    if (out_ids == nullptr || max_ids <= 0) {
+        return 0;
+    }
+    int written = 0;
+    for (const MapPoint& point : result_.reconstruction.points) {
+        if (!point.valid) {
+            continue;
+        }
+        if (written >= max_ids) {
+            break;
+        }
+        int first_view = -1;
+        for (const Observation& observation : point.observations) {
+            if (first_view < 0 || observation.view < first_view) {
+                first_view = observation.view;
+            }
+        }
+        out_ids[written] = first_view;
+        ++written;
+    }
+    return written;
+}
+
 int Session::cameraCount() const {
     return static_cast<int>(result_.reconstruction.views.size());
 }

@@ -29,6 +29,8 @@ class ReconstructionRunner {
         val dense_positions_m: DoubleArray = DoubleArray(0),
         val dense_views: Int = 0,
         val cancelled: Boolean = false,
+        /** One colour per sparse point, grouped and coloured by its keyframe (D059). */
+        val keyframe_colours: FloatArray = FloatArray(0),
     ) {
         val points: Int get() = positions_m.size / 3
         val dense_points: Int get() = dense_positions_m.size / 3
@@ -102,15 +104,20 @@ class ReconstructionRunner {
             } else {
                 DoubleArray(0)
             }
+            val cloud_ids = IntArray(positions.size / 3)
+            if (cloud_ids.isNotEmpty()) {
+                NativeCore.reconstructionCopyKeyframeIds(handle, cloud_ids)
+            }
+            val keyframe_colours = KeyframeClouds.colours(cloud_ids, positions.size / 3)
             Log.i(LOG_TAG, "$added views, $registered registered, ${positions.size / 3} points")
             if (dense == null) {
-                return Outcome(added, registered, positions)
+                return Outcome(added, registered, positions, keyframe_colours = keyframe_colours)
             }
             if (positions.isEmpty()) {
                 // Without sparse points there is no frame for the dense cloud to live in and no
                 // depth hint range, so a dense pass on top of it would be guesswork.
                 Log.w(LOG_TAG, "dense skipped: the sparse stage produced no points")
-                return Outcome(added, registered, positions)
+                return Outcome(added, registered, positions, keyframe_colours = keyframe_colours)
             }
 
             val cloud = runDense(
@@ -127,6 +134,7 @@ class ReconstructionRunner {
                 dense_positions_m = cloud.points,
                 dense_views = cloud.views,
                 cancelled = cloud.cancelled,
+                keyframe_colours = keyframe_colours,
             )
         } catch (t: Throwable) {
             Log.e(LOG_TAG, "reconstruction failed", t)

@@ -142,6 +142,9 @@ fun CaptureRoute(viewModel: CaptureViewModel = viewModel()) {
                 onOverlayOpacityChange = viewModel::setOverlayOpacity,
                 onDenseEnabledChange = viewModel::setDenseEnabled,
                 onDenseQualityClick = viewModel::cycleDenseQuality,
+                onExposureChange = viewModel::setManualExposure,
+                onFocusChange = viewModel::setManualFocus,
+                onKeyframeCloudsChange = viewModel::setKeyframeClouds,
             )
         }
     }
@@ -156,6 +159,9 @@ private fun CameraScreen(
     onOverlayOpacityChange: (Float) -> Unit,
     onDenseEnabledChange: (Boolean) -> Unit,
     onDenseQualityClick: () -> Unit,
+    onExposureChange: (Long) -> Unit,
+    onFocusChange: (Float) -> Unit,
+    onKeyframeCloudsChange: (Boolean) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         Box(
@@ -187,6 +193,9 @@ private fun CameraScreen(
         if (state.overlayEnabled) {
             OpacitySlider(state = state, onOverlayOpacityChange = onOverlayOpacityChange)
         }
+        ExposureSlider(state = state, onExposureChange = onExposureChange)
+        FocusSlider(state = state, onFocusChange = onFocusChange)
+        KeyframeCloudsRow(state = state, onKeyframeCloudsChange = onKeyframeCloudsChange)
         Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(DIVIDER_COLOR))
         CaptureControls(
             state = state,
@@ -403,6 +412,95 @@ private fun DenseToggle(enabled: Boolean, onChange: (Boolean) -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Text(text = "3D", color = tint, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+/**
+ * Manual exposure for the stills, 1-66 ms. The locked auto value is what a scan normally uses, so
+ * an untouched slider says "Auto" and only a move overrides it (D059).
+ */
+@Composable
+private fun ExposureSlider(state: CaptureUiState, onExposureChange: (Long) -> Unit) {
+    val manual = state.manualExposureNs > 0L
+    val valueMs = if (manual) state.manualExposureNs / 1_000_000L else 33L
+    SliderRow(
+        label = stringResource(R.string.capture_exposure_label),
+        value = if (manual) {
+            stringResource(R.string.capture_exposure_value, valueMs.toInt())
+        } else {
+            stringResource(R.string.capture_setting_auto)
+        },
+        sliderValue = valueMs.toFloat(),
+        valueRange = 1f..66f,
+        onValueChange = { onExposureChange(it.toLong() * 1_000_000L) },
+    )
+}
+
+/** Manual focus in dioptres, 0 (infinity) to 10 (10 cm); the locked value is the default. */
+@Composable
+private fun FocusSlider(state: CaptureUiState, onFocusChange: (Float) -> Unit) {
+    val manual = state.manualFocusDiopter >= 0f
+    val value = if (manual) state.manualFocusDiopter else 0f
+    SliderRow(
+        label = stringResource(R.string.capture_focus_label),
+        value = if (manual) {
+            stringResource(R.string.capture_focus_value, value)
+        } else {
+            stringResource(R.string.capture_setting_auto)
+        },
+        sliderValue = value,
+        valueRange = 0f..10f,
+        onValueChange = onFocusChange,
+    )
+}
+
+/** One labelled slider with its current value; the three rows share this shape. */
+@Composable
+private fun SliderRow(
+    label: String,
+    value: String,
+    sliderValue: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    onValueChange: (Float) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(text = label, color = SECONDARY_TEXT, fontSize = 12.sp)
+            Text(text = value, color = SECONDARY_TEXT, fontSize = 12.sp)
+        }
+        Slider(
+            value = sliderValue,
+            onValueChange = onValueChange,
+            valueRange = valueRange,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color.White,
+                inactiveTrackColor = Color(0x33FFFFFF),
+            ),
+        )
+    }
+}
+
+/** Switches between one merged photo-coloured cloud and one cloud per keyframe (D059). */
+@Composable
+private fun KeyframeCloudsRow(state: CaptureUiState, onKeyframeCloudsChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.keyframe_clouds_toggle_label),
+            color = SECONDARY_TEXT,
+            fontSize = 12.sp,
+        )
+        androidx.compose.material3.Switch(
+            checked = state.keyframeClouds,
+            onCheckedChange = onKeyframeCloudsChange,
+        )
     }
 }
 

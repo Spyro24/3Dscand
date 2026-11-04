@@ -27,6 +27,12 @@
     <string name="capture_gallery_description">Newest saved frame</string>
     <string name="capture_flip_label">Flip camera</string>
     <string name="overlay_opacity_label">Overlay opacity</string>
+    <string name="capture_exposure_label">Exposure</string>
+    <string name="capture_exposure_value">%1$d ms</string>
+    <string name="capture_focus_label">Focus</string>
+    <string name="capture_focus_value">%1$.1f 1/m</string>
+    <string name="capture_setting_auto">Auto</string>
+    <string name="keyframe_clouds_toggle_label">Keyframe clouds</string>
     <string name="dense_toggle_label">Dense cloud</string>
     <string name="dense_quality_content_description">Dense quality: %1$s</string>
     <string name="dense_quality_draft">Draft</string>

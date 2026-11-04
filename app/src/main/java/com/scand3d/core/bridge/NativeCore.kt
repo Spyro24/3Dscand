@@ -117,6 +117,14 @@ object NativeCore {
     fun reconstructionPointCount(handle: Long): Int =
         if (isLoaded && handle != 0L) nativeReconstructionPointCount(handle) else 0
 
+    /** Per valid point, in [reconstructionCopyPoints] order, the keyframe that first saw it. */
+    fun reconstructionCopyKeyframeIds(handle: Long, out_ids: IntArray): Int =
+        if (isLoaded && handle != 0L && out_ids.isNotEmpty()) {
+            nativeReconstructionCopyKeyframeIds(handle, out_ids)
+        } else {
+            0
+        }
+
     /** Fills `out_positions` with xyz triples; returns how many points were written. */
     fun reconstructionCopyPoints(handle: Long, out_positions: DoubleArray): Int =
         if (isLoaded && handle != 0L && out_positions.size >= 3) {
@@ -417,6 +425,11 @@ object NativeCore {
     private external fun nativeReconstructionLoadMap(handle: Long, directory: String): Boolean
 
     private external fun nativeReconstructionPointCount(handle: Long): Int
+
+    private external fun nativeReconstructionCopyKeyframeIds(
+        handle: Long,
+        out_ids: IntArray,
+    ): Int
 
     private external fun nativeReconstructionCopyPoints(
         handle: Long,

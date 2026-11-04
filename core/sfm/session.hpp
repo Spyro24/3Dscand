@@ -48,6 +48,10 @@ public:
     /// Writes valid points as xyz, up to `max_points`. Returns how many were written.
     int copyPoints(double* positions_m, int max_points) const;
 
+    /// Writes, for each valid point in `copyPoints` order, the index of the view that first saw
+    /// it. Lets a caller show one cloud per keyframe instead of one merged cloud (D059).
+    int copyKeyframeIds(int* out_ids, int max_ids) const;
+
     int cameraCount() const;
 
     /// Copies one view's estimated pose. False for an out-of-range index.

@@ -193,8 +193,13 @@ class CaptureViewModel(application: Application) :
         // A dense pass on the previous scan would compete with this capture's live map.
         denseRunner?.cancel()
         liveReconstruction = LiveReconstruction(
-            on_cloud = { points, reference, tracker ->
-                applyReconstruction(points, reference, tracker_handle = tracker)
+            on_cloud = { points, colours, reference, tracker ->
+                applyReconstruction(
+                    points,
+                    reference,
+                    tracker_handle = tracker,
+                    keyframe_colours = colours,
+                )
             },
         )
         savedFrameIndex = 0
@@ -272,6 +277,26 @@ class CaptureViewModel(application: Application) :
         val clamped = opacity.coerceIn(0f, 1f)
         _state.value = _state.value.copy(overlayOpacity = clamped)
         OverlayFeed.setStyle(_state.value.overlayEnabled, clamped)
+    }
+
+    /** UI: manual exposure for the stills; 0 returns to the locked value (D059). */
+    fun setManualExposure(ns: Long) {
+        val clamped = ns.coerceIn(0L, 100_000_000L)
+        _state.value = _state.value.copy(manualExposureNs = clamped)
+        controller?.setManualExposure(clamped)
+    }
+
+    /** UI: manual focus in dioptres; negative returns to the locked value (D059). */
+    fun setManualFocus(diopter: Float) {
+        val clamped = if (diopter < 0f) -1f else diopter.coerceIn(0f, 10f)
+        _state.value = _state.value.copy(manualFocusDiopter = clamped)
+        controller?.setManualFocus(clamped)
+    }
+
+    /** UI: one cloud per keyframe instead of photo colours (D059). */
+    fun setKeyframeClouds(enabled: Boolean) {
+        _state.value = _state.value.copy(keyframeClouds = enabled)
+        Log.i(LOG_TAG, "keyframe clouds: $enabled")
     }
 
     /** UI: give a finished capture a dense pass (roadmap 6). */
@@ -381,7 +406,10 @@ class CaptureViewModel(application: Application) :
                     )
                     return@Thread
                 }
-                applyReconstruction(outcome.positions_m)
+                applyReconstruction(
+                    outcome.positions_m,
+                    keyframe_colours = outcome.keyframe_colours,
+                )
             },
             "reconstruction",
         ).start()
@@ -393,6 +421,7 @@ class CaptureViewModel(application: Application) :
         source: String = "sparse",
         publish_stream: Boolean = true,
         tracker_handle: Long = 0L,
+        keyframe_colours: FloatArray? = null,
     ) {
         // The snapshot is consumed here whether or not the cloud is usable, so no native handle
         // is leaked when a run produces points but the overlay cannot take them.
@@ -435,7 +464,13 @@ class CaptureViewModel(application: Application) :
 
         // Colours start white and are replaced by the keyframe sample below.
         val world = toOverlayFrame(positions_m, basis)
-        val colours = FloatArray(world.size) { 1.0f }
+        val by_keyframe = _state.value.keyframeClouds && keyframe_colours != null &&
+            keyframe_colours.size == world.size
+        val colours = if (by_keyframe) {
+            keyframe_colours!!
+        } else {
+            FloatArray(world.size) { 1.0f }
+        }
         if (!NativeCore.overlaySetPoints(handle, world, colours)) {
             Log.w(LOG_TAG, "$source: overlay rejected the cloud")
             return
@@ -443,7 +478,11 @@ class CaptureViewModel(application: Application) :
         overlayPointCount = world.size / 3
         overlayDemo = true
         Log.i(LOG_TAG, "$source: $overlayPointCount points in the overlay")
-        sampleKeyframeColors()
+        if (by_keyframe) {
+            Log.i(LOG_TAG, "$source: keyframe-coloured clouds")
+        } else {
+            sampleKeyframeColors()
+        }
         val vertices = publishOverlay()
         Log.i(LOG_TAG, "$source: $vertices of $overlayPointCount points project into the preview")
     }

@@ -39,6 +39,11 @@ data class CaptureUiState(
     /** Overlay toggle and opacity (roadmap 5.4). */
     val overlayEnabled: Boolean = true,
     val overlayOpacity: Float = 1.0f,
+    /** Manual capture settings (D059); 0 ns / negative dioptres mean the locked auto value. */
+    val manualExposureNs: Long = 0L,
+    val manualFocusDiopter: Float = -1f,
+    /** Draw one cloud per keyframe instead of one merged, photo-coloured cloud (D059). */
+    val keyframeClouds: Boolean = true,
     /** Dense stage (roadmap 6): whether a finished capture gets a dense pass, at which preset, and
      * its progress while it runs (null when idle). */
     val denseEnabled: Boolean = false,

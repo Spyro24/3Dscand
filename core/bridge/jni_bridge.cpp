@@ -153,6 +153,26 @@ Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionRun(JNIEnv* /*env*/,
         static_cast<scand3d::bridge::ReconstructionHandle>(handle));
 }
 
+extern "C" JNIEXPORT jint JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionCopyKeyframeIds(
+    JNIEnv* env, jobject /*instance*/, jlong handle, jintArray out_ids) {
+    if (out_ids == nullptr) {
+        return 0;
+    }
+    const jsize length = env->GetArrayLength(out_ids);
+    if (length <= 0) {
+        return 0;
+    }
+    std::vector<int> ids(static_cast<std::size_t>(length));
+    const int written = scand3d::bridge::reconstructionCopyKeyframeIds(
+        static_cast<scand3d::bridge::ReconstructionHandle>(handle), ids.data(),
+        static_cast<int>(length));
+    if (written > 0) {
+        env->SetIntArrayRegion(out_ids, 0, written, reinterpret_cast<const jint*>(ids.data()));
+    }
+    return written;
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionSaveMap(JNIEnv* env,
                                                                    jobject /*instance*/,

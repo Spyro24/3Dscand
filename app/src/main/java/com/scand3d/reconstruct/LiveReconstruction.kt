@@ -18,7 +18,7 @@ import java.util.ArrayDeque
  * property of a scan.
  */
 class LiveReconstruction(
-    private val on_cloud: (DoubleArray, DoubleArray?, Long) -> Unit,
+    private val on_cloud: (DoubleArray, FloatArray, DoubleArray?, Long) -> Unit,
     private val min_interval_ms: Long = MIN_INTERVAL_MS,
     private val max_views: Int = MAX_VIEWS,
 ) {
@@ -196,6 +196,12 @@ class LiveReconstruction(
             DoubleArray(0)
         }
 
+        // One cloud per keyframe: each point carries the keyframe that first saw it (D059).
+        val cloud_ids = IntArray(positions.size / 3)
+        if (cloud_ids.isNotEmpty()) {
+            NativeCore.reconstructionCopyKeyframeIds(handle, cloud_ids)
+        }
+
         synchronized(lock) { last_run_ms = SystemClock.elapsedRealtime() }
         val elapsed = SystemClock.elapsedRealtime() - started
         Log.i(
@@ -206,7 +212,12 @@ class LiveReconstruction(
         if (positions.isNotEmpty()) {
             // The snapshot is handed out with the cloud: the caller owns it from here and destroys
             // it when the next one replaces it (D051).
-            on_cloud(positions, reference_orientation, NativeCore.trackerCreate(handle))
+            on_cloud(
+                positions,
+                KeyframeClouds.colours(cloud_ids, positions.size / 3),
+                reference_orientation,
+                NativeCore.trackerCreate(handle),
+            )
         }
     }
 

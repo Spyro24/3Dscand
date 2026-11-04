@@ -906,3 +906,22 @@ Measured on the replayed SM-G930F sessions (`bright480`: 26 frames, 480x360, foc
 - The app still has to save a scan's map when it stops and load one when a new scan starts; that
   wiring is deliberately not part of this change because the phone path cannot be verified while
   the device is off USB.
+
+## D059 — Per-keyframe clouds and manual exposure/focus sliders
+
+- The overlay had one merged cloud. Each point now carries the keyframe that first observed it
+  (`Session::copyKeyframeIds`, exposed as `reconstructionCopyKeyframeIds`, state min view index per
+  point), and the app colours each cloud with a golden-ratio hue step so neighbouring keyframes of
+  a sequential scan stay distinguishable. The "Keyframe clouds" switch on the capture screen turns
+  it off again, which restores the merged photo-sampled cloud; the dense cloud stays merged because
+  a fused point has no single keyframe.
+- The colouring happens in `KeyframeClouds` on the app side instead of in the native overlay: the
+  cloud is rotated into the overlay frame there anyway, and keeping the palette next to the UI
+  toggle avoids a second colour mode in the scene that the bridge would have to manage.
+- Exposure and focus got manual sliders for the stills. A slider only overrides the value it was
+  moved for; gain, white balance and the other axis stay at the value the capture locked (D050,
+  D052), so a scan still has one photometric setting. An untouched slider reads "Auto" and keeps
+  the locked value. Manual exposure is capped at 100 ms, the same ceiling the still path already
+  enforced for dim light.
+- Measured: nothing visual yet. The APK builds and the slider values reach the still capture
+  request, but the phone UI has not been exercised for this change.

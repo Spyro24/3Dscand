@@ -77,6 +77,11 @@ int reconstructionPointCount(ReconstructionHandle handle);
 /// Writes valid points as xyz into `positions_m`; returns how many were written.
 int reconstructionCopyPoints(ReconstructionHandle handle, double* positions_m, int max_points);
 
+/// For each valid point, in `reconstructionCopyPoints` order, the view index of the keyframe that
+/// first observed it, so the caller can draw one cloud per keyframe (D059). Returns how many ids
+/// were written; -1 for an unknown handle.
+int reconstructionCopyKeyframeIds(ReconstructionHandle handle, int* out_ids, int max_ids);
+
 /// Estimated pose of one reconstruction view. False for an out-of-range index.
 bool reconstructionCopyCamera(
     ReconstructionHandle handle,

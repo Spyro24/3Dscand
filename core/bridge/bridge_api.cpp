@@ -395,6 +395,15 @@ int reconstructionCopyPoints(ReconstructionHandle handle, double* positions_m, i
     return it->second->copyPoints(positions_m, max_points);
 }
 
+int reconstructionCopyKeyframeIds(ReconstructionHandle handle, int* out_ids, int max_ids) {
+    std::lock_guard<std::mutex> lock(g_reconstruction_mutex);
+    const auto it = g_reconstructions.find(handle);
+    if (it == g_reconstructions.end()) {
+        return -1;
+    }
+    return it->second->copyKeyframeIds(out_ids, max_ids);
+}
+
 bool reconstructionCopyCamera(
     ReconstructionHandle handle,
     int index,

@@ -119,6 +119,9 @@ class CameraCaptureController(
         Thread(runnable, "frame-writer").apply { isDaemon = true }
     }
     private var warmUpFrames = 0
+    // Manual slider values (D059); 0 / negative mean "keep the locked value".
+    private var manualExposureNs = 0L
+    private var manualFocusDiopter = -1f
     private var fpsWindowStartNs = 0L
     private var fpsWindowFrames = 0
     private var lastStatsReportMs = 0L
@@ -203,6 +206,16 @@ class CameraCaptureController(
     fun bufferedFrameCount(): Int = ringBuffer.size()
 
     fun lockedSettings(): LockedCaptureSettings? = lockedSettings
+
+    /** Manual exposure for the stills; 0 keeps the locked value (D059). */
+    fun setManualExposure(ns: Long) {
+        handler?.post { manualExposureNs = if (ns > 0L) ns else 0L }
+    }
+
+    /** Manual focus in dioptres for the stills; negative keeps the locked value (D059). */
+    fun setManualFocus(diopter: Float) {
+        handler?.post { manualFocusDiopter = if (diopter >= 0f) diopter else -1f }
+    }
 
     @SuppressLint("MissingPermission")
     fun start(surface: Surface) {
@@ -640,9 +653,20 @@ class CameraCaptureController(
         )
         request.set(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
         request.set(CaptureRequest.LENS_FOCUS_DISTANCE, settings.focus_diopter)
+        // A slider only overrides the value it was moved for; exposure, gain, white balance and the
+        // other axis stay locked, so a scan keeps one photometric setting (D059).
+        if (manualExposureNs > 0L) {
+            request.set(CaptureRequest.SENSOR_EXPOSURE_TIME, manualExposureNs)
+        }
+        if (manualFocusDiopter >= 0f) {
+            request.set(CaptureRequest.LENS_FOCUS_DISTANCE, manualFocusDiopter)
+        }
         request.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
         request.set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_OFF)
     }
+
+    /** Longest a still may expose; beyond this the phone's frame timing falls apart (D052). */
+    private val MAX_STILL_EXPOSURE_NS = 100_000_000L
 
     private fun captureStill() {
         val session = captureSession ?: return
@@ -658,7 +682,11 @@ class CameraCaptureController(
             // The lock was taken from a preview that has to fit 30 fps, so it is never longer than
             // about 33 ms. A still may expose for longer, which is the difference between a frame
             // with corners and a black one in dim light (D052).
-            val still_exposure_ns = lockedSettings?.let { stillExposureNs(it.exposure_ns) } ?: 0L
+            val still_exposure_ns = when {
+                manualExposureNs > 0L -> minOf(manualExposureNs, MAX_STILL_EXPOSURE_NS)
+                lockedSettings != null -> stillExposureNs(lockedSettings!!.exposure_ns)
+                else -> 0L
+            }
             if (still_exposure_ns > 0L) {
                 set(CaptureRequest.SENSOR_EXPOSURE_TIME, still_exposure_ns)
                 set(CaptureRequest.SENSOR_FRAME_DURATION, still_exposure_ns + STILL_FRAME_MARGIN_NS)
