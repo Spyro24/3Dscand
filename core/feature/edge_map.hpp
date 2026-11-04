@@ -46,4 +46,12 @@ EdgeMap detectEdges(const GrayImage& image, const EdgeParams& params = {});
 /// Sobel gradient magnitude at one pixel, on the same 0..255 scale as `EdgeMap::magnitude`.
 int gradientMagnitudeAt(const GrayImage& image, int x_px, int y_px);
 
+/// True when the gradients in a small window around the pixel all point the same way, which makes
+/// the pixel a straight one-dimensional contour. A patch descriptor there matches any position
+/// along the line, so it is not worth a keypoint; a corner-free but two-dimensional region still
+/// is. The test is the smaller eigenvalue of the structure tensor against the larger one, and
+/// `max_ratio` is the largest anisotropy still considered usable.
+bool isStraightContour(
+    const GrayImage& image, int x_px, int y_px, int radius_px = 2, double max_ratio = 0.02);
+
 }  // namespace scand3d::feature

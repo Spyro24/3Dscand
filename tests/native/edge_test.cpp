@@ -96,10 +96,10 @@ TEST(EdgePoints, AddSupportWhereCornersAloneFindAlmostNothing) {
 
     // Four corners is all a flat rectangle gives FAST; the contour adds samples along all sides.
     EXPECT_LE(without_edges.size(), 8u);
-    // The rectangle's 320-pixel perimeter at the default 8-pixel spacing gives about 40 samples,
-    // less the neighbourhoods taken by the four corners.
-    EXPECT_GE(with.size(), 24u);
-    EXPECT_GT(with.size(), 3u * without_edges.size());
+    // The rectangle's contour is straight, so it is sampled on the wider straight-contour grid:
+    // its 320-pixel perimeter at three times the 8-pixel spacing gives a dozen or so points.
+    EXPECT_GE(with.size(), 10u);
+    EXPECT_GT(with.size(), 2u * without_edges.size());
 
     // Every extra point sits on the contour, never in the flat interior or the background. The
     // tolerance covers the pyramid: a sample found on a level-2 image maps back to level 0 within

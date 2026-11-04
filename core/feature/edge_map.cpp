@@ -75,6 +75,40 @@ int gradientMagnitudeAt(const GrayImage& image, int x_px, int y_px) {
     return scaledMagnitude(sobel(image, x_px, y_px));
 }
 
+bool isStraightContour(
+    const GrayImage& image, int x_px, int y_px, int radius_px, double max_ratio) {
+    double sum_xx = 0.0;
+    double sum_xy = 0.0;
+    double sum_yy = 0.0;
+    const int radius = std::max(0, radius_px);
+    for (int dy = -radius; dy <= radius; ++dy) {
+        for (int dx = -radius; dx <= radius; ++dx) {
+            const int x = x_px + dx;
+            const int y = y_px + dy;
+            if (x < 1 || y < 1 || x >= image.width_px - 1 || y >= image.height_px - 1) {
+                continue;
+            }
+            const Gradient gradient = sobel(image, x, y);
+            sum_xx += static_cast<double>(gradient.x) * gradient.x;
+            sum_xy += static_cast<double>(gradient.x) * gradient.y;
+            sum_yy += static_cast<double>(gradient.y) * gradient.y;
+        }
+    }
+    const double trace = sum_xx + sum_yy;
+    if (!(trace > 1e-9)) {
+        return true;  // no gradient at all: nothing to match either
+    }
+    // Eigenvalues of the symmetric 2x2 structure tensor.
+    const double half_difference = 0.5 * (sum_xx - sum_yy);
+    const double root = std::sqrt(half_difference * half_difference + sum_xy * sum_xy);
+    const double larger = 0.5 * trace + root;
+    const double smaller = 0.5 * trace - root;
+    if (!(larger > 1e-12)) {
+        return true;
+    }
+    return (smaller / larger) < max_ratio;
+}
+
 EdgeMap detectEdges(const GrayImage& image, const EdgeParams& params) {
     EdgeMap map;
     if (image.empty()) {

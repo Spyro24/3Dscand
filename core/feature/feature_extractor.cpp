@@ -20,8 +20,7 @@ struct EdgeSample {
 };
 
 /// Radius around every corner that needs no edge samples: another point there adds nothing the
-/// corner does not already give, and a point on a straight edge between two corners is exactly the
-/// ambiguous measurement that lowered match precision to 89% on the textured fixture.
+/// corner does not already give.
 std::vector<std::uint8_t> cornerCoverage(
     const std::vector<FastCorner>& corners, int width_px, int height_px, int radius_px) {
     std::vector<std::uint8_t> covered(
@@ -44,7 +43,13 @@ std::vector<std::uint8_t> cornerCoverage(
 /// One sample per grid cell along the thinned contours, keeping the strongest pixel of each cell.
 /// The cell grid spreads samples along a long contour without an O(n^2) spacing pass, and it stops
 /// one high-contrast corner from filling the whole list.
+///
+/// Straight contours get their own, three times wider grid. A point on a one-dimensional contour is
+/// ambiguous along it, so a few of them cover a plain surface where the corner detector found
+/// nothing, while many of them would only feed the matcher matches the ratio test has to reject
+/// (D053).
 std::vector<EdgeSample> sampleEdges(
+    const GrayImage& image,
     const EdgeMap& edges,
     const std::vector<std::uint8_t>& covered,
     int spacing_px,
@@ -55,38 +60,60 @@ std::vector<EdgeSample> sampleEdges(
         return samples;
     }
     const int spacing = std::max(1, spacing_px);
-    const int columns = (edges.width_px + spacing - 1) / spacing;
-    const int rows = (edges.height_px + spacing - 1) / spacing;
-    std::vector<EdgeSample> best(static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows));
-    std::vector<std::uint8_t> filled(best.size(), 0);
-    for (int y = 0; y < edges.height_px; ++y) {
-        for (int x = 0; x < edges.width_px; ++x) {
-            if (!edges.isEdge(x, y)) {
-                continue;
-            }
-            if (covered[static_cast<std::size_t>(y) * edges.width_px + x] != 0) {
-                continue;
-            }
-            const int magnitude = edges.magnitudeAt(x, y);
-            if (magnitude < min_magnitude) {
-                continue;
-            }
-            const std::size_t cell =
-                static_cast<std::size_t>(y / spacing) * static_cast<std::size_t>(columns) +
-                static_cast<std::size_t>(x / spacing);
-            if (filled[cell] != 0 && best[cell].magnitude >= magnitude) {
-                continue;
-            }
-            best[cell] = {x, y, magnitude};
-            filled[cell] = 1;
+
+    auto collect = [&](bool straight, int cell_px, int cap) {
+        if (cap <= 0 || cell_px <= 0) {
+            return;
         }
-    }
-    samples.reserve(best.size() / 4 + 1);
-    for (std::size_t cell = 0; cell < best.size(); ++cell) {
-        if (filled[cell] != 0) {
-            samples.push_back(best[cell]);
+        const int columns = (edges.width_px + cell_px - 1) / cell_px;
+        const int rows = (edges.height_px + cell_px - 1) / cell_px;
+        std::vector<EdgeSample> best(
+            static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows));
+        std::vector<std::uint8_t> filled(best.size(), 0);
+        for (int y = 0; y < edges.height_px; ++y) {
+            for (int x = 0; x < edges.width_px; ++x) {
+                if (!edges.isEdge(x, y)) {
+                    continue;
+                }
+                const int magnitude = edges.magnitudeAt(x, y);
+                if (magnitude < min_magnitude) {
+                    continue;
+                }
+                if (covered[static_cast<std::size_t>(y) * edges.width_px + x] != 0) {
+                    continue;
+                }
+                if (isStraightContour(image, x, y) != straight) {
+                    continue;
+                }
+                const std::size_t cell =
+                    static_cast<std::size_t>(y / cell_px) * static_cast<std::size_t>(columns) +
+                    static_cast<std::size_t>(x / cell_px);
+                if (filled[cell] != 0 && best[cell].magnitude >= magnitude) {
+                    continue;
+                }
+                best[cell] = {x, y, magnitude};
+                filled[cell] = 1;
+            }
         }
-    }
+        std::vector<EdgeSample> kept;
+        kept.reserve(best.size() / 4 + 1);
+        for (std::size_t cell = 0; cell < best.size(); ++cell) {
+            if (filled[cell] != 0) {
+                kept.push_back(best[cell]);
+            }
+        }
+        std::sort(kept.begin(), kept.end(), [](const EdgeSample& a, const EdgeSample& b) {
+            return a.magnitude > b.magnitude;
+        });
+        if (static_cast<int>(kept.size()) > cap) {
+            kept.resize(static_cast<std::size_t>(cap));
+        }
+        samples.insert(samples.end(), kept.begin(), kept.end());
+    };
+
+    collect(false, spacing, limit - limit / 4);
+    collect(true, std::max(spacing * 3, spacing + 1), limit / 4);
+
     std::sort(samples.begin(), samples.end(), [](const EdgeSample& a, const EdgeSample& b) {
         return a.magnitude > b.magnitude;
     });
@@ -143,8 +170,8 @@ FeatureSet extractFeatures(const GrayImage& image, const FeatureParams& params) 
 
         // Corners alone leave a smooth or low-contrast surface without support: the corner
         // detector needs two gradient directions, and a table edge or an object outline has one.
-        // The samples are only worth adding where the corner detector actually runs dry; on a
-        // textured frame they cost match precision without adding support the corners lack (D053).
+        // So the edge map stands in exactly where the corner detector failed to find structure,
+        // and a textured frame keeps precisely its corners (D053).
         const bool corner_poor =
             static_cast<int>(corners.size()) < params.edge_corner_floor;
         if (params.max_edge_points_per_level > 0 && corner_poor &&
@@ -159,7 +186,7 @@ FeatureSet extractFeatures(const GrayImage& image, const FeatureParams& params) 
             const std::vector<std::uint8_t> covered = cornerCoverage(
                 corners, level.image.width_px, level.image.height_px, corner_radius_px);
             const auto samples = sampleEdges(
-                edges, covered, spacing_px, params.edge_min_magnitude,
+                level.image, edges, covered, spacing_px, params.edge_min_magnitude,
                 params.max_edge_points_per_level);
             for (const EdgeSample& sample : samples) {
                 add_candidate(sample.x_px, sample.y_px, static_cast<double>(sample.magnitude));

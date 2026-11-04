@@ -457,6 +457,27 @@ TEST(Session, SnapshotTracksIndependentlyOfLaterRuns) {
     EXPECT_EQ(blank_inliers, 0);
 }
 
+TEST(Session, SnapshotWithoutAMapRefusesToTrackInsteadOfCrashing) {
+    // The app snapshots a session at the start of a scan, when frames exist and no map does: the
+    // snapshot then holds every view's features but no registered view at all. Walking the feature
+    // sets for a reference view used to read past the end of the registered list and crash.
+    auto session = makeSession();
+    const auto scene = renderScene(7u);
+    ASSERT_GT(addRing(session, scene, 3), 0);
+
+    const auto tracker = session.snapshot();
+    ASSERT_TRUE(tracker != nullptr);
+    // Three views' features, no map yet: the snapshot carries them all, none registered.
+    ASSERT_EQ(3, tracker->viewCount());
+
+    const syn::Image image = syn::render(scene, 0);
+    scand3d::sfm::Pose pose;
+    int inliers = -1;
+    EXPECT_FALSE(tracker->track(image.width_px, image.height_px, image.pixels.data(), kFocalPx,
+                                image.width_px * 0.5, image.height_px * 0.5, pose, inliers, -1));
+    EXPECT_EQ(0, inliers);
+}
+
 TEST(Session, EmptySnapshotRefusesToTrack) {
     const syn::Scene scene = renderScene(7u);
     scand3d::sfm::Session session = makeSession();

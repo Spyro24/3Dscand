@@ -43,10 +43,13 @@ bool Tracker::track(
         return false;
     }
 
+    // A snapshot can carry more feature sets than it has registration flags (see
+    // Session::snapshot); only the flagged prefix can be a reference view.
+    const std::size_t view_count = std::min(features_.size(), registered_.size());
     int reference = view_hint;
-    if (reference < 0 || static_cast<std::size_t>(reference) >= features_.size()) {
+    if (reference < 0 || static_cast<std::size_t>(reference) >= view_count) {
         reference = -1;
-        for (std::size_t index = features_.size(); index > 0; --index) {
+        for (std::size_t index = view_count; index > 0; --index) {
             if (registered_[index - 1]) {
                 reference = static_cast<int>(index - 1);
                 break;

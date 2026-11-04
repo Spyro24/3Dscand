@@ -17,12 +17,12 @@ struct FeatureParams {
     int max_features = 1200;
     int orientation_radius_px = 15;
 
-    /// Points sampled along the edge map, per level (D053). Off by default: measured on the real
-    /// scans, edge points cost match precision and map points instead of adding support (see the
-    /// numbers in docs/DECISIONS.md D053), so a caller has to ask for them. A corner detector
-    /// needs two gradient directions and a table edge or an object outline gives it none, which is
-    /// the case these samples exist for.
-    int max_edge_points_per_level = 0;
+    /// Points sampled along the edge map, per level (D053). These exist for the level where the
+    /// corner detector finds almost nothing - a plain wall, a dark frame, a smooth object. They
+    /// only apply to a corner-poor level and never to a two-dimensional patch, because a point on
+    /// a straight contour matches any position along it and cost match precision when sampled
+    /// blindly (docs/DECISIONS.md D053).
+    int max_edge_points_per_level = 300;
 
     /// Minimum distance between two edge samples, in level-0 pixels.
     double edge_spacing_px = 8.0;
@@ -30,9 +30,10 @@ struct FeatureParams {
     /// Sobel magnitude (0..255) an edge sample needs; below this the contour is noise.
     int edge_min_magnitude = 48;
 
-    /// A pyramid level with fewer corners than this is treated as corner-poor and gets edge
-    /// samples. On a textured frame the level has hundreds and its features stay unchanged.
-    int edge_corner_floor = 120;
+    /// A level with fewer corners than this has effectively failed to find structure, so edge
+    /// samples stand in. The floor is deliberately low: a textured frame keeps exactly its
+    /// corners, and edges only appear where the detector found almost nothing at all.
+    int edge_corner_floor = 20;
 
     /// How many of the finest pyramid levels may contribute edge samples. One keeps them at the
     /// resolution where their positions are exact.

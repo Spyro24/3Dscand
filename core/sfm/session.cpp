@@ -701,9 +701,14 @@ std::shared_ptr<const Tracker> Session::snapshot() const {
     // matches the cloud on screen.
     auto tracker = std::shared_ptr<Tracker>(new Tracker());
     tracker->features_ = features_;
-    tracker->registered_.reserve(result_.reconstruction.views.size());
-    for (const ViewState& view : result_.reconstruction.views) {
-        tracker->registered_.push_back(view.registered);
+    // Parallel to features_, not to the reconstruction: a session that has frames but no map yet
+    // (the state the app snapshots when a scan starts) holds more feature sets than the
+    // reconstruction has views, and a shorter list made the tracker read past its end.
+    tracker->registered_.assign(features_.size(), false);
+    const std::vector<ViewState>& views = result_.reconstruction.views;
+    for (std::size_t index = 0; index < views.size() && index < tracker->registered_.size();
+         ++index) {
+        tracker->registered_[index] = views[index].registered;
     }
     tracker->point_of_feature_ = featureIndex(result_.reconstruction);
     tracker->point_positions_.reserve(result_.reconstruction.points.size());
