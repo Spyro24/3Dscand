@@ -125,7 +125,7 @@ Goal: the reconstruction appears in color over the monochrome preview, aligned t
 - [ ] 5.5 Drift check: overlay stays aligned after motion
 
 - [x] 5.6 One cloud per keyframe, coloured by the keyframe that first saw it (D059)
-- [x] 5.7 Manual exposure and focus sliders for the stills (D059)
+- [x] 5.7 Manual exposure and focus sliders that drive the preview too, in a collapsed panel (D059)
 **Acceptance:** overlay stays within about 10 px of the real object after 10 seconds of handheld motion; overlay toggle is instant (under 100 ms).
 
 **Status:** 5.1 is implemented: `core/overlay/` projects coloured points through a pinhole camera

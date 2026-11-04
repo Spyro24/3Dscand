@@ -923,5 +923,13 @@ Measured on the replayed SM-G930F sessions (`bright480`: 26 frames, 480x360, foc
   D052), so a scan still has one photometric setting. An untouched slider reads "Auto" and keeps
   the locked value. Manual exposure is capped at 100 ms, the same ceiling the still path already
   enforced for dim light.
-- Measured: nothing visual yet. The APK builds and the slider values reach the still capture
-  request, but the phone UI has not been exercised for this change.
+- The first version only reached the stills: a slider stored the override but re-issued no
+  preview request, so the preview never changed, and the three added rows pushed the preview
+  smaller. Now a slider rebuilds the repeating preview request from the locked settings plus the
+  value it moved (one apply per 80 ms, so a drag cannot starve the camera), preview exposure is
+  clamped to a 33 ms frame while a still may use the full 100 ms, and the two sliders plus the
+  keyframe-clouds switch sit in a "Manual controls" panel that starts collapsed.
+- Measured on the SM-G930F through the debug receiver (`cmd exposure`, `cmd focus`), which calls
+  the same setters the sliders call: `manual preview: exposure=60000000ns focus=-1.0diopter`, then
+  `focus=3.0diopter`, with the preview session still at 30 fps, analysis frames still arriving, no
+  crash, and `0ns` returning to the locked exposure. The panel layout was not inspected on screen.
