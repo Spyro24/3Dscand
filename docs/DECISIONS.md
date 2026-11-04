@@ -465,3 +465,22 @@ here with its version, license and reason (agents.md sections 2 and 7).
   registered only the seed pair. Further growth is blocked by the fixture rather than the loop: the
   weakest neighbouring pair has about 16 matches, so nothing anchors the next pose. The same loop
   needs a capture with denser matches, which only real frames can show.
+
+### D038 - A value-noise fixture, an essential-matrix fallback, and the planar PnP limit
+- **Decision:** `tests/synthetic` gains `makeNoiseTexturedBoxScene`, which shades the box from a
+  smoothstepped value-noise field over surface coordinates instead of the flat per-cell albedo of the
+  Phase 3 box. The field is opt-in through `Scene::value_noise_texture`, so every existing scene
+  renders byte-identically. Two estimator changes came out of using it: essential-matrix RANSAC now
+  samples minimal sets that span the image (a sample from one face is planar and fits that face
+  only), and when the calibrated fit keeps fewer than half the matches it falls back to estimating F
+  in pixels and calibrating it with E = K2^T F K1, which is exact rather than approximate.
+- **Reason:** the flat-cell mosaic gave neighbouring views as few as 24-34 geometrically consistent
+  matches while the same geometry elsewhere gave hundreds, and the equal-singular-value fit collapsed
+  on a mostly planar surface (34 essential inliers against 296 fundamental inliers on the same 310
+  matches). Both are artefacts of the estimator and the fixture, not of the reconstruction loop.
+- **Consequence:** the noise fixture raises a neighbour pair to 296 inliers, and the session grows to
+  three views and 114 points at 0.375 px mean reprojection. It then stops at a different, genuine
+  limit: the map lives on a box face, and `solvePoseDlt` is degenerate for coplanar points, so PnP
+  reports no valid pose even with 96 mapped correspondences and the next view is rejected. Planar
+  PnP (homography decomposition, or a plane-aware DLT) is the next piece; until it exists the loop
+  cannot be measured on a whole scan, and the overlay keeps drawing the debug cloud.

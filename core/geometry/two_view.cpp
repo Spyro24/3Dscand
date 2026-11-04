@@ -151,6 +151,29 @@ TwoViewResult ransac(
     std::uniform_int_distribution<int> pick(
         0, static_cast<int>(correspondences.size()) - 1);
 
+    // Stratified sampling. Eight points drawn from one face of an object are a planar sample, and a
+    // planar sample produces a model that explains that face while rejecting the rest of the image;
+    // on a box that is most of the image, so the inlier count collapses. Requiring the sample to
+    // span the image keeps the minimal set non-degenerate (D038).
+    double min_x = correspondences[0].first[0];
+    double max_x = min_x;
+    double min_y = correspondences[0].first[1];
+    double max_y = min_y;
+    for (const PointCorrespondence& correspondence : correspondences) {
+        min_x = std::min(min_x, correspondence.first[0]);
+        max_x = std::max(max_x, correspondence.first[0]);
+        min_y = std::min(min_y, correspondence.first[1]);
+        max_y = std::max(max_y, correspondence.first[1]);
+    }
+    const double span_x = std::max(max_x - min_x, 1e-9);
+    const double span_y = std::max(max_y - min_y, 1e-9);
+    const auto cellOf = [min_x, min_y, span_x, span_y, &correspondences](int index) {
+        const Vec2& point = correspondences[static_cast<std::size_t>(index)].first;
+        const int cell_x = std::clamp(static_cast<int>(3.0 * (point[0] - min_x) / span_x), 0, 2);
+        const int cell_y = std::clamp(static_cast<int>(3.0 * (point[1] - min_y) / span_y), 0, 2);
+        return cell_x * 3 + cell_y;
+    };
+
     Mat3 best{};
     std::vector<int> best_inliers;
     int iteration_limit = std::max(1, options.max_iterations);
@@ -161,15 +184,24 @@ TwoViewResult ransac(
 
         std::array<int, 8> sample{};
         bool unique = false;
-        for (int attempt = 0; attempt < 100 && !unique; ++attempt) {
+        int distinct_cells = 0;
+        for (int attempt = 0; attempt < 100 && (!unique || distinct_cells < 3); ++attempt) {
             for (int& index : sample) {
                 index = pick(random);
             }
             std::array<int, 8> sorted = sample;
             std::sort(sorted.begin(), sorted.end());
             unique = std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end();
+            if (!unique) {
+                continue;
+            }
+            std::array<bool, 9> cells{};
+            for (const int index : sample) {
+                cells[static_cast<std::size_t>(cellOf(index))] = true;
+            }
+            distinct_cells = static_cast<int>(std::count(cells.begin(), cells.end(), true));
         }
-        if (!unique) {
+        if (!unique || distinct_cells < 3) {
             continue;
         }
 
@@ -321,8 +353,37 @@ TwoViewResult estimateEssentialRansac(
 
     // The threshold is in pixels, so convert it into the calibrated image plane.
     const double mean_focal = std::sqrt(first.focal_px * second.focal_px);
-    TwoViewResult result =
-        ransac(calibrated, options.threshold_px / mean_focal, options, true);
+    const double calibrated_threshold = options.threshold_px / mean_focal;
+    TwoViewResult result = ransac(calibrated, calibrated_threshold, options, true);
+
+    // On a mostly planar surface the equal-singular-value fit is poorly conditioned and can keep
+    // only a small fraction of the correct matches, while the unconstrained fundamental fit keeps
+    // nearly all of them. When that happens, estimate F in pixels and calibrate it: the essential
+    // matrix is E = K2^T F K1 by definition, so nothing is approximated (D038).
+    if (!result.valid || result.inlier_indices.size() * 2 < correspondences.size()) {
+        const TwoViewResult pixel_result =
+            ransac(correspondences, options.threshold_px, options, false);
+        if (pixel_result.valid) {
+            const Mat3 essential = essentialFromFundamental(pixel_result.matrix, first, second);
+            std::vector<int> inliers;
+            std::vector<double> distances;
+            for (std::size_t i = 0; i < calibrated.size(); ++i) {
+                const double distance = sampsonDistancePx(essential, calibrated[i]);
+                if (distance < calibrated_threshold) {
+                    inliers.push_back(static_cast<int>(i));
+                    distances.push_back(distance);
+                }
+            }
+            if (inliers.size() >= 8 && inliers.size() > result.inlier_indices.size()) {
+                // Scaled once below, with the other path's median.
+                result.median_sampson_px = median(std::move(distances));
+                result.inlier_indices = std::move(inliers);
+                result.matrix = essential;
+                result.valid = true;
+            }
+        }
+    }
+
     if (result.valid) {
         result.median_sampson_px *= mean_focal;
     }

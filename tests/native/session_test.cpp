@@ -76,6 +76,8 @@ TEST(Session, ReportsMatchCountsOnRenderedViews) {
     scand3d::feature::MatchOptions options;
     options.ratio_percent = 80;
     options.cross_check = true;
+    options.ratio_percent = 80;
+    options.cross_check = true;
     for (std::size_t index = 0; index + 1 < features.size(); ++index) {
         const auto matches =
             scand3d::feature::matchApproximate(features[index], features[index + 1], options);
@@ -97,6 +99,50 @@ TEST(Session, ReportsMatchCountsOnRenderedViews) {
     }
 
     EXPECT_GT(features[0].size(), 200u);
+
+    // Same numbers on the value-noise surface: if it carries too few corners, growth has nothing to
+    // work with no matter how the loop is written.
+    const syn::Scene noise_scene =
+        syn::makeNoiseTexturedBoxScene(kViewCount, 1.5, 0.45, kWidthPx, kHeightPx, kFocalPx,
+                                       20261104u);
+    std::vector<scand3d::feature::FeatureSet> noise_features;
+    for (int index = 0; index < 3; ++index) {
+        noise_features.push_back(featuresOf(syn::render(noise_scene, index)));
+    }
+    for (std::size_t index = 0; index + 1 < noise_features.size(); ++index) {
+        const auto matches = scand3d::feature::matchApproximate(
+            noise_features[index], noise_features[index + 1], options);
+        std::vector<scand3d::geometry::PointCorrespondence> correspondences;
+        for (const auto& match : matches) {
+            correspondences.push_back(
+                {{noise_features[index]
+                      .keypoints[static_cast<std::size_t>(match.query_index)]
+                      .x_px,
+                  noise_features[index]
+                      .keypoints[static_cast<std::size_t>(match.query_index)]
+                      .y_px},
+                 {noise_features[index + 1]
+                      .keypoints[static_cast<std::size_t>(match.train_index)]
+                      .x_px,
+                  noise_features[index + 1]
+                      .keypoints[static_cast<std::size_t>(match.train_index)]
+                      .y_px}});
+        }
+        const auto ransac = scand3d::geometry::estimateEssentialRansac(
+            correspondences,
+            scand3d::geometry::CameraIntrinsics{kFocalPx, 0.5 * kWidthPx, 0.5 * kHeightPx},
+            scand3d::geometry::CameraIntrinsics{kFocalPx, 0.5 * kWidthPx, 0.5 * kHeightPx});
+        // The fundamental estimator is uncalibrated and less constrained, so comparing the two
+        // separates a failing estimator from failing matches.
+        const auto fundamental =
+            scand3d::geometry::estimateFundamentalRansac(correspondences);
+        std::printf("noise view %zu->%zu features %zu/%zu matches %zu essential %zu (%.2f px) "
+                    "fundamental %zu (%.2f px)\n",
+                    index, index + 1, noise_features[index].size(), noise_features[index + 1].size(),
+                    matches.size(), ransac.inlier_indices.size(), ransac.median_sampson_px,
+                    fundamental.inlier_indices.size(), fundamental.median_sampson_px);
+    }
+    EXPECT_GT(noise_features[0].size(), 200u);
 }
 
 // Diagnostic only: runs the seeder on exact ground-truth correspondences. If this keeps few points,
@@ -158,6 +204,28 @@ TEST(Session, ReconstructsARenderedTurntable) {
     // scene seed is pinned so this depth is reproducible.
     EXPECT_GE(report.views_registered, 3) << report.summary();
     EXPECT_GT(session.pointCount(), 40) << report.summary();
+    EXPECT_LT(report.mean_reprojection_px, 3.0) << report.summary();
+}
+
+// The flat speckle of the Phase 3 box stops growth at its weakest neighbouring pair (~16 matches),
+// so the multi-view path is measured on a surface with a continuous texture instead (D038).
+TEST(Session, GrowsOnAValueNoiseTexturedTurntable) {
+    const syn::Scene scene =
+        syn::makeNoiseTexturedBoxScene(kViewCount, 1.5, 0.45, kWidthPx, kHeightPx, kFocalPx,
+                                       20261104u);
+    scand3d::sfm::Session session = makeSession();
+    ASSERT_EQ(addRing(session, scene, kViewCount), kViewCount);
+
+    const scand3d::sfm::ReconstructionReport report = session.run();
+    std::printf("noise session: %s\n", report.summary().c_str());
+
+    // The continuous texture raises a neighbour pair from 29 to 296 consistent matches, and the map
+    // grows to three views and over a hundred points. It stops there because the map is a box face:
+    // coplanar points make the six-point PnP DLT degenerate, so the next view cannot be placed
+    // (D038). These bounds are what the current solver delivers, not what the loop is meant to
+    // reach.
+    EXPECT_GE(report.views_registered, 3) << report.summary();
+    EXPECT_GT(session.pointCount(), 100) << report.summary();
     EXPECT_LT(report.mean_reprojection_px, 3.0) << report.summary();
 }
 

@@ -215,7 +215,9 @@ The measured part of this path is three of twenty-four views at 0.375 px mean re
 pair is chosen because a neighbour can use its points, and further views chain the pair's own
 relative pose where the map is too thin for PnP (D037). Growth stops at the ring's weakest
 neighbouring pair (~16 geometric matches), so the overlay still draws the debug cloud and this stays
-`[~]` (D035, D037).
+`[~]` (D035, D037). On a second fixture with a continuous value-noise texture, a neighbour pair keeps
+296 of 310 matches and the map reaches three views and 114 points before PnP refuses: the map is a
+box face, and the six-point DLT cannot solve a coplanar point set (D038).
 
 ## Current phase status
 

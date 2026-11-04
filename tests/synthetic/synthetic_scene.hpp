@@ -18,6 +18,9 @@ struct Vertex {
     Vec3 position_m{};
     Vec3 normal{};
     std::uint8_t albedo = 255;  // grayscale 0..255
+    // Surface coordinates in meters, used only when the scene draws a per-pixel texture.
+    double u_m = 0.0;
+    double v_m = 0.0;
 };
 
 struct Triangle {
@@ -57,6 +60,11 @@ struct Projection {
 struct Scene {
     Mesh mesh;
     std::vector<Camera> cameras;
+    // Shade from a smooth value-noise field over the vertex surface coordinates instead of the flat
+    // quad albedo. Flat cells give a mosaic whose corners are hard to match across viewpoints; a
+    // continuous field gives every surface patch a unique, view-stable neighbourhood (D038).
+    bool value_noise_texture = false;
+    std::uint32_t texture_seed = 0;
 };
 
 /// Asymmetric box-on-box object: enough shape and shading variation to recover pose later.
@@ -110,6 +118,18 @@ Scene makeTexturedBoxScene(
     int height_px,
     double focal_px,
     int cells_per_axis,
+    std::uint32_t seed);
+
+/// Turntable ring around a box whose faces are shaded by per-pixel value noise. Unlike the flat
+/// speckle of `makeTexturedBoxScene`, neighbouring cells differ smoothly, so descriptors computed on
+/// it stay comparable when the viewpoint changes.
+Scene makeNoiseTexturedBoxScene(
+    int ring_count,
+    double radius_m,
+    double height_m,
+    int width_px,
+    int height_px,
+    double focal_px,
     std::uint32_t seed);
 
 /// Vertices of front-facing triangles that project inside the image, deduplicated by position.

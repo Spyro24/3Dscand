@@ -71,6 +71,42 @@ std::uint32_t hashCell(int face, int i, int j, std::uint32_t seed) {
     return h;
 }
 
+// Value noise: a bilinear, smoothstepped lattice. Deterministic for a seed and defined on surface
+// coordinates, so the same patch of an object looks the same from every viewpoint.
+std::uint32_t hashLattice(int i, int j, std::uint32_t seed) {
+    std::uint32_t h = seed + 0x9E3779B9u * static_cast<std::uint32_t>(i + 7907) +
+                      0x85EBCA6Bu * static_cast<std::uint32_t>(j + 104729);
+    h ^= h >> 16;
+    h *= 0x7FEB352Du;
+    h ^= h >> 15;
+    h *= 0x846CA68Bu;
+    h ^= h >> 16;
+    return h;
+}
+
+double smoothStep(double t) { return t * t * (3.0 - 2.0 * t); }
+
+double valueLattice(double x, double y, std::uint32_t seed) {
+    const int i = static_cast<int>(std::floor(x));
+    const int j = static_cast<int>(std::floor(y));
+    const double fx = smoothStep(x - static_cast<double>(i));
+    const double fy = smoothStep(y - static_cast<double>(j));
+    const double scale = 1.0 / 4294967296.0;
+    const double a = hashLattice(i, j, seed) * scale;
+    const double b = hashLattice(i + 1, j, seed) * scale;
+    const double c = hashLattice(i, j + 1, seed) * scale;
+    const double d = hashLattice(i + 1, j + 1, seed) * scale;
+    const double top = a + (b - a) * fx;
+    const double bottom = c + (d - c) * fx;
+    return top + (bottom - top) * fy;
+}
+
+double valueNoise(double u_m, double v_m, std::uint32_t seed) {
+    const double base = valueLattice(u_m / 0.012, v_m / 0.012, seed);
+    const double detail = valueLattice(u_m / 0.0035, v_m / 0.0035, seed ^ 0x9E3779B9u);
+    return std::clamp(0.72 * base + 0.28 * detail, 0.0, 1.0);
+}
+
 // Adds one quad as two triangles. Each face gets its own vertices so it can carry a flat normal.
 void addQuad(Mesh& mesh, const std::array<Vec3, 4>& corners, const Vec3& normal, std::uint8_t albedo) {
     const auto base = static_cast<int>(mesh.vertices.size());
@@ -79,6 +115,24 @@ void addQuad(Mesh& mesh, const std::array<Vec3, 4>& corners, const Vec3& normal,
         vertex.position_m = corner;
         vertex.normal = normal;
         vertex.albedo = albedo;
+        mesh.vertices.push_back(vertex);
+    }
+    mesh.triangles.push_back({base + 0, base + 1, base + 2});
+    mesh.triangles.push_back({base + 0, base + 2, base + 3});
+}
+
+/// Quad whose corners carry surface coordinates, so the renderer can shade it per pixel.
+void addTexturedQuad(Mesh& mesh, const std::array<Vec3, 4>& corners, const Vec3& normal,
+                     double u0_m, double v0_m, double u1_m, double v1_m) {
+    const auto base = static_cast<int>(mesh.vertices.size());
+    const double u[4] = {u0_m, u1_m, u1_m, u0_m};
+    const double v[4] = {v0_m, v0_m, v1_m, v1_m};
+    for (int index = 0; index < 4; ++index) {
+        Vertex vertex;
+        vertex.position_m = corners[static_cast<std::size_t>(index)];
+        vertex.normal = normal;
+        vertex.u_m = u[index];
+        vertex.v_m = v[index];
         mesh.vertices.push_back(vertex);
     }
     mesh.triangles.push_back({base + 0, base + 1, base + 2});
@@ -258,6 +312,17 @@ Image render(const Scene& scene, int camera_index) {
                     continue;
                 }
 
+                // Flat-cell meshes keep the quad albedo; textured ones shade per pixel from the
+                // interpolated surface coordinates.
+                std::uint8_t pixel_value = intensity;
+                if (scene.value_noise_texture) {
+                    const double u_m = w0 * v0.u_m + w1 * v1.u_m + w2 * v2.u_m;
+                    const double v_m = w0 * v0.v_m + w1 * v1.v_m + w2 * v2.v_m;
+                    const double albedo = 25.0 + 205.0 * valueNoise(u_m, v_m, scene.texture_seed);
+                    pixel_value =
+                        static_cast<std::uint8_t>(std::clamp(albedo * shade, 0.0, 255.0));
+                }
+
                 const double depth_m =
                     w0 * p0.depth_m + w1 * p1.depth_m + w2 * p2.depth_m;
                 const auto index = static_cast<std::size_t>(y_px) *
@@ -265,7 +330,7 @@ Image render(const Scene& scene, int camera_index) {
                                    static_cast<std::size_t>(x_px);
                 if (depth_m < depth_buffer[index]) {
                     depth_buffer[index] = depth_m;
-                    image.pixels[index] = intensity;
+                    image.pixels[index] = pixel_value;
                 }
             }
         }
@@ -353,6 +418,73 @@ Scene makeTexturedBoxScene(
     std::uint32_t seed) {
     Scene scene;
     scene.mesh = makeTexturedBox({-0.35, -0.25, 0.35}, {0.35, 0.25, 0.85}, cells_per_axis, seed);
+    addRingCameras(scene, ring_count, radius_m, height_m, width_px, height_px, focal_px,
+                   {0.0, 0.0, 0.6});
+    return scene;
+}
+
+Scene makeNoiseTexturedBoxScene(
+    int ring_count,
+    double radius_m,
+    double height_m,
+    int width_px,
+    int height_px,
+    double focal_px,
+    std::uint32_t seed) {
+    Scene scene;
+    const Vec3 min_m{-0.35, -0.25, 0.35};
+    const Vec3 max_m{0.35, 0.25, 0.85};
+    const double dx = max_m[0] - min_m[0];
+    const double dy = max_m[1] - min_m[1];
+    const double dz = max_m[2] - min_m[2];
+
+    struct Face {
+        Vec3 origin;
+        Vec3 u;
+        Vec3 v;
+        Vec3 normal;
+        double width;
+        double height;
+    };
+    const Face faces[6] = {
+        {{min_m[0], min_m[1], max_m[2]}, {1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}, dx, dy},
+        {{max_m[0], min_m[1], min_m[2]}, {-1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, -1.0}, dx, dy},
+        {{max_m[0], min_m[1], max_m[2]}, {0.0, 0.0, -1.0}, {0.0, 1.0, 0.0}, {1.0, 0.0, 0.0}, dz, dy},
+        {{min_m[0], min_m[1], min_m[2]}, {0.0, 0.0, 1.0}, {0.0, 1.0, 0.0}, {-1.0, 0.0, 0.0}, dz, dy},
+        {{min_m[0], max_m[1], min_m[2]}, {1.0, 0.0, 0.0}, {0.0, 0.0, -1.0}, {0.0, 1.0, 0.0}, dx, dz},
+        {{min_m[0], min_m[1], min_m[2]}, {1.0, 0.0, 0.0}, {0.0, 0.0, 1.0}, {0.0, -1.0, 0.0}, dx, dz},
+    };
+
+    Mesh mesh;
+    constexpr int kCells = 4;
+    for (int face = 0; face < 6; ++face) {
+        const Face& current = faces[face];
+        // Each face gets its own offset into the noise field, so the six faces never repeat a patch
+        // and cannot be confused with each other by a descriptor.
+        const double u_offset = 3.7 * static_cast<double>(face);
+        const double v_offset = 1.9 * static_cast<double>(face);
+        for (int i = 0; i < kCells; ++i) {
+            for (int j = 0; j < kCells; ++j) {
+                const double u0 = current.width * static_cast<double>(i) / kCells;
+                const double u1 = current.width * static_cast<double>(i + 1) / kCells;
+                const double v0 = current.height * static_cast<double>(j) / kCells;
+                const double v1 = current.height * static_cast<double>(j + 1) / kCells;
+                auto corner = [&current](double u, double v) {
+                    return Vec3{current.origin[0] + current.u[0] * u + current.v[0] * v,
+                                current.origin[1] + current.u[1] * u + current.v[1] * v,
+                                current.origin[2] + current.u[2] * u + current.v[2] * v};
+                };
+                addTexturedQuad(mesh,
+                                {corner(u0, v0), corner(u1, v0), corner(u1, v1), corner(u0, v1)},
+                                current.normal, u_offset + u0, v_offset + v0, u_offset + u1,
+                                v_offset + v1);
+            }
+        }
+    }
+
+    scene.mesh = std::move(mesh);
+    scene.value_noise_texture = true;
+    scene.texture_seed = seed;
     addRingCameras(scene, ring_count, radius_m, height_m, width_px, height_px, focal_px,
                    {0.0, 0.0, 0.6});
     return scene;

@@ -152,6 +152,13 @@ stops at the ring's weakest neighbouring pair, which yields only about 16 geomet
 matches, so the speckle fixture cannot feed a full scan (D035). The overlay therefore still draws
 the debug cloud by default, and the tracking half of 5.2 stays `[~]` until a real scan registers.
 
+A second fixture shades the box with continuous value noise instead of flat cells (D038). It raises
+a neighbour pair from 34 to 296 geometrically consistent matches, and on it the map grows to three
+views and 114 points at 0.375 px mean reprojection. Growth then stops for a reason unrelated to
+matches: the map from a box face is coplanar, and the six-point PnP DLT is degenerate on coplanar
+points, so the next view cannot be placed. Planar PnP is the open piece before the loop can be
+measured on a whole scan.
+
 5.3 is implemented natively: `overlay::samplePointColors` takes the per-channel median of a 3x3
 keyframe patch around each point's projection, and `KeyframeColorSampler` decodes the newest saved
 JPEG, packs it to RGB and calls it through the bridge (D033). Six gtest cases cover it. With no
