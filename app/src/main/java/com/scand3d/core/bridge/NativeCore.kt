@@ -19,4 +19,12 @@ object NativeCore {
 
     val isLoaded: Boolean
         get() = loadError == null
+
+    /**
+     * Version reported by the native core, or null when the library did not load. Calling this
+     * is what proves the bridge works end to end.
+     */
+    fun coreVersionOrNull(): String? = if (isLoaded) nativeCoreVersion() else null
+
+    private external fun nativeCoreVersion(): String
 }

@@ -2,4 +2,6 @@
 <resources>
     <string name="app_name">3D Scan</string>
     <string name="state_idle">Idle</string>
+    <string name="native_core_loaded">native core %1$s</string>
+    <string name="native_core_missing">native core unavailable</string>
 </resources>

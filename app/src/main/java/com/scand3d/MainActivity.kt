@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.scand3d.core.bridge.NativeCore
 import com.scand3d.ui.theme.Scand3dTheme
 
 class MainActivity : ComponentActivity() {
@@ -50,6 +51,22 @@ fun FoundationScreen(modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Text(
+            text = nativeCoreStatus(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
+    }
+}
+
+/** Proves the JNI bridge answered, or reports that the native core is missing. */
+@Composable
+private fun nativeCoreStatus(): String {
+    val version = NativeCore.coreVersionOrNull()
+    return if (version == null) {
+        stringResource(R.string.native_core_missing)
+    } else {
+        stringResource(R.string.native_core_loaded, version)
     }
 }
 

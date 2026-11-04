@@ -64,3 +64,11 @@ here with its version, license and reason (agents.md sections 2 and 7).
   agents.md section 2, `-DANDROID_STL=c++_static` so the APK carries one shared library.
 - **Consequence:** Both live in the project-local SDK (D003). Native sources are compiled by
   CMake into a single `libscand3d_core.so`; the app loads it from `Scand3dApplication`.
+
+### D009 - Single JNI bridge, one `external fun` per call
+- **Reason:** agents.md section 3 allows exactly one JNI bridge. The Kotlin side is a `NativeCore`
+  object whose `loadError` is captured instead of thrown, so a missing `.so` degrades to a UI
+  message instead of a launch crash, and native functions are declared `external` one-to-one with
+  `extern "C"` entry points in `core/bridge/jni_bridge.cpp`.
+- **Consequence:** Every future native call is added there and reaches C++ through the interface
+  header `core/bridge/bridge_api.hpp`, so nothing else in Kotlin talks to JNI directly.

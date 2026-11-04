@@ -10,6 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # single JNI bridge in core/bridge (agents.md section 3). Per-ABI packaging is controlled by
 # the app module's abiFilters.
 add_library(scand3d_core SHARED
+    bridge/bridge_api.cpp
     bridge/jni_bridge.cpp
     bridge/native_init.cpp
 )
