@@ -109,6 +109,7 @@ fun CaptureRoute(viewModel: CaptureViewModel = viewModel()) {
                     CameraPreview(
                         widthPx = state.previewWidthPx,
                         heightPx = state.previewHeightPx,
+                        rotationDeg = state.previewRotationDeg,
                         onTextureReady = viewModel::onPreviewTextureReady,
                     )
                 }
@@ -127,6 +128,7 @@ fun CaptureRoute(viewModel: CaptureViewModel = viewModel()) {
 private fun CameraPreview(
     widthPx: Int,
     heightPx: Int,
+    rotationDeg: Int,
     onTextureReady: (SurfaceTexture) -> Unit,
 ) {
     AndroidView(
@@ -134,7 +136,8 @@ private fun CameraPreview(
         factory = { context ->
             GLSurfaceView(context).apply {
                 setEGLContextClientVersion(2)
-                val renderer = MonochromePreviewRenderer(widthPx, heightPx, onTextureReady)
+                val renderer =
+                    MonochromePreviewRenderer(widthPx, heightPx, rotationDeg, onTextureReady)
                 renderer.bindRequestRender {
                     // Redraw only when the camera delivers a frame.
                     requestRender()

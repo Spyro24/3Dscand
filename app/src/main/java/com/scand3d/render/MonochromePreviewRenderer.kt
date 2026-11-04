@@ -16,8 +16,13 @@ import javax.microedition.khronos.opengles.GL10
 class MonochromePreviewRenderer(
     private val textureWidthPx: Int,
     private val textureHeightPx: Int,
+    /** Quarter turns, clockwise, that make the sensor image upright on the display (D040). */
+    rotationDeg: Int,
     private val onSurfaceTextureReady: (SurfaceTexture) -> Unit,
 ) : GLSurfaceView.Renderer, SurfaceTexture.OnFrameAvailableListener {
+
+    private val quarterTurns =
+        (((rotationDeg % 360) + 360) % 360 / 90).toFloat()
 
     private var program = 0
     private var textureId = 0
@@ -26,6 +31,7 @@ class MonochromePreviewRenderer(
     private var texCoordHandle = 0
     private var matrixHandle = 0
     private var textureHandle = 0
+    private var rotationHandle = 0
     private val textureMatrix = FloatArray(16)
     private val vertexBuffer = GlBuffers.floatBuffer(
         floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f),
@@ -43,6 +49,7 @@ class MonochromePreviewRenderer(
     private var pointColorHandle = 0
     private var pointOpacityHandle = 0
     private var pointSizeHandle = 0
+    private var pointRotationHandle = 0
     private var overlayBuffer: FloatBuffer? = null
     private var overlayVertexCount = 0
     private var pendingOverlay: FloatArray? = null
@@ -60,6 +67,7 @@ class MonochromePreviewRenderer(
         texCoordHandle = GLES20.glGetAttribLocation(program, "aTexCoord")
         matrixHandle = GLES20.glGetUniformLocation(program, "uTexMatrix")
         textureHandle = GLES20.glGetUniformLocation(program, "uTexture")
+        rotationHandle = GLES20.glGetUniformLocation(program, "uRotation")
 
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
@@ -84,6 +92,7 @@ class MonochromePreviewRenderer(
         pointColorHandle = GLES20.glGetAttribLocation(pointsProgram, "aColor")
         pointOpacityHandle = GLES20.glGetUniformLocation(pointsProgram, "uOpacity")
         pointSizeHandle = GLES20.glGetUniformLocation(pointsProgram, "uPointSize")
+        pointRotationHandle = GLES20.glGetUniformLocation(pointsProgram, "uRotation")
         // Replays the last published scene and style into a renderer that was just rebuilt.
         OverlayFeed.bind(::submitOverlay, ::applyOverlayStyle)
     }
@@ -107,9 +116,13 @@ class MonochromePreviewRenderer(
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-        // Letterbox the camera image so its aspect ratio survives the surface's shape.
+        // Letterbox the camera image so its aspect ratio survives the surface's shape. The displayed
+        // image is the sensor image turned upright, so a quarter turn swaps its edges.
+        val swapsEdges = quarterTurns == 1f || quarterTurns == 3f
+        val displayWidthPx = if (swapsEdges) textureHeightPx else textureWidthPx
+        val displayHeightPx = if (swapsEdges) textureWidthPx else textureHeightPx
         val viewAspect = viewportWidthPx.toFloat() / viewportHeightPx.toFloat()
-        val textureAspect = textureWidthPx.toFloat() / textureHeightPx.toFloat()
+        val textureAspect = displayWidthPx.toFloat() / displayHeightPx.toFloat()
         val drawWidth: Int
         val drawHeight: Int
         if (viewAspect > textureAspect) {
@@ -126,6 +139,7 @@ class MonochromePreviewRenderer(
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
         GLES20.glUniform1i(textureHandle, 0)
         GLES20.glUniformMatrix4fv(matrixHandle, 1, false, textureMatrix, 0)
+        GLES20.glUniform1f(rotationHandle, quarterTurns)
 
         GLES20.glEnableVertexAttribArray(positionHandle)
         GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
@@ -182,6 +196,7 @@ class MonochromePreviewRenderer(
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
         GLES20.glUniform1f(pointOpacityHandle, overlayOpacity)
         GLES20.glUniform1f(pointSizeHandle, OVERLAY_POINT_SIZE_PX)
+        GLES20.glUniform1f(pointRotationHandle, quarterTurns)
 
         GLES20.glEnableVertexAttribArray(pointPositionHandle)
         GLES20.glVertexAttribPointer(
@@ -218,7 +233,9 @@ class MonochromePreviewRenderer(
         const val LOG_TAG = "MonochromePreview"
         const val OVERLAY_VERTEX_FLOATS = 5
         const val OVERLAY_STRIDE_BYTES = OVERLAY_VERTEX_FLOATS * 4
-        const val OVERLAY_POINT_SIZE_PX = 6.0f
+        // Six-pixel dots the colour of the scene vanish into it; the overlay has to read as a scan
+        // over the image, so points are drawn larger and lifted towards white.
+        const val OVERLAY_POINT_SIZE_PX = 10.0f
 
         // Luminance from the sensor's RGB, then a single grey channel: no colour reaches the screen.
         const val FRAGMENT_SHADER = """
@@ -237,22 +254,43 @@ class MonochromePreviewRenderer(
             attribute vec4 aPosition;
             attribute vec4 aTexCoord;
             uniform mat4 uTexMatrix;
+            uniform float uRotation;
             varying vec2 vTexCoord;
             void main() {
                 gl_Position = aPosition;
-                vTexCoord = (uTexMatrix * aTexCoord).xy;
+                vec2 uv = (uTexMatrix * aTexCoord).xy;
+                float quarter = floor(uRotation + 0.5);
+                if (quarter > 2.5) {
+                    uv = vec2(uv.y, 1.0 - uv.x);
+                } else if (quarter > 1.5) {
+                    uv = vec2(1.0 - uv.x, 1.0 - uv.y);
+                } else if (quarter > 0.5) {
+                    uv = vec2(1.0 - uv.y, uv.x);
+                }
+                vTexCoord = uv;
             }
         """
 
         // Point sprites: the vertex stage receives NDC computed by the native overlay projection,
-        // so this shader only sizes and colours a point.
+        // so this shader only rotates (the projection works in the sensor image, the preview is
+        // turned upright), sizes and colours a point.
         const val POINT_VERTEX_SHADER = """
             attribute vec2 aPosition;
             attribute vec3 aColor;
             uniform float uPointSize;
+            uniform float uRotation;
             varying vec3 vColor;
             void main() {
-                gl_Position = vec4(aPosition, 0.0, 1.0);
+                vec2 p = aPosition;
+                float quarter = floor(uRotation + 0.5);
+                if (quarter > 2.5) {
+                    p = vec2(-p.y, p.x);
+                } else if (quarter > 1.5) {
+                    p = -p;
+                } else if (quarter > 0.5) {
+                    p = vec2(p.y, -p.x);
+                }
+                gl_Position = vec4(p, 0.0, 1.0);
                 gl_PointSize = uPointSize;
                 vColor = aColor;
             }
@@ -263,7 +301,7 @@ class MonochromePreviewRenderer(
             uniform float uOpacity;
             varying vec3 vColor;
             void main() {
-                gl_FragColor = vec4(vColor, uOpacity);
+                gl_FragColor = vec4(mix(vColor, vec3(1.0), 0.35), uOpacity);
             }
         """
     }

@@ -122,6 +122,10 @@ class CaptureViewModel(application: Application) :
             phase = CapturePhase.Starting,
             previewWidthPx = created.previewSizePx.width,
             previewHeightPx = created.previewSizePx.height,
+            // The app is portrait-locked, so the sensor image needs this many quarter turns to be
+            // upright on screen.
+            previewRotationDeg =
+                ((created.sensorOrientationDeg - displayRotationDeg()) % 360 + 360) % 360,
         )
     }
 

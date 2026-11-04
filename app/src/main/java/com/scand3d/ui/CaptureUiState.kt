@@ -20,6 +20,8 @@ data class CaptureUiState(
     val phase: CapturePhase = CapturePhase.WaitingForPermission,
     val previewWidthPx: Int = 0,
     val previewHeightPx: Int = 0,
+    /** Clockwise quarter turns that make the sensor image upright (D040). */
+    val previewRotationDeg: Int = 0,
     val fps: Float = 0f,
     val locked: LockedCaptureSettings? = null,
     val savedFrames: Int = 0,

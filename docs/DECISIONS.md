@@ -502,3 +502,20 @@ here with its version, license and reason (agents.md sections 2 and 7).
   each update re-matches every pair (12 views cost 14 s), so the loop is not yet incremental; a pair
   cache in the session is the next step. Map growth on a real scene still stops where D038 says,
   coplanar PnP, which is why the point counts are small.
+
+### D040 - Turn the preview upright, and make the overlay readable on it
+- **Decision:** the preview renderer takes the camera's sensor orientation and rotates the sensor
+  image by whole quarter turns, letterboxing by the *rotated* aspect; the overlay point shader
+  applies the same quarter turn to its NDC, so the projection computed in the sensor image still
+  lands on the right pixels. Points are drawn at 10 px and lifted 35% towards white. The capture
+  controller rebuilds its handler thread when the previous one has been quit, and clears the field
+  when the camera is lost.
+- **Reason:** the app is portrait-locked and the sensor is landscape, so a 1280x720 image was drawn
+  as a 16:9 band inside a 9:16 surface: the preview looked squashed and the overlay rectangle did
+  not match the visible image. Points were also 6 px and painted the scene's own colour, so a
+  correct cloud was invisible in practice. Separately, re-entering the app after a camera loss
+  crashed the GL thread, because `start()` built a `Handler` from a thread whose looper had been
+  quit.
+- **Consequence:** on the SM-G930F the preview fills the screen upright and the live cloud reads
+  clearly during a capture (124 points at eight views, all projecting). Verified with device
+  screenshots rather than by inference; the frames are in `app/build/shot*.png`.

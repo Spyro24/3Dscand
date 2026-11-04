@@ -233,6 +233,10 @@ class CameraCaptureController(
         previewSurface = null
         deviceStateCallback = null
         cameraThread?.quitSafely()
+        // A quit thread cannot hand out a looper, so keep the field clear or the next start builds
+        // a Handler with a null looper and takes the GL thread down with it.
+        cameraThread = null
+        handler = null
         listener.onCameraLost(reason)
     }
 
@@ -314,7 +318,8 @@ class CameraCaptureController(
     }
 
     private fun ensureThread() {
-        if (cameraThread != null) {
+        val existing = cameraThread
+        if (existing != null && existing.isAlive) {
             return
         }
         cameraThread = HandlerThread("camera-capture").also { it.start() }
