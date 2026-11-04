@@ -253,6 +253,33 @@ TEST(FeaturePipeline, MatchedInliersAgreeWithKnown3DPoints) {
         << "correct " << correct << " of " << mapped << " verified inliers";
 }
 
+TEST(FeatureMatching, EdgeDirectionBreaksADescriptorTie) {
+    // Two identical descriptors on the same contour: only the gradient direction says which one a
+    // query belongs to. This is the ambiguity that made contour points cost precision before the
+    // matcher used the direction (D054).
+    FeatureSet query;
+    query.keypoints = {Keypoint{0.0, 0.0, 1.0, 0.0, 1.0, 0.0, true}};
+    query.descriptors = {Descriptor{}};
+
+    FeatureSet train;
+    train.keypoints = {Keypoint{10.0, 10.0, 1.0, 0.0, 1.0, 1.48, true},
+                       Keypoint{20.0, 20.0, 1.0, 0.0, 1.0, 0.09, true}};
+    train.descriptors = {Descriptor{}, Descriptor{}};
+
+    // Without the direction the two candidates are indistinguishable, so the ratio test rejects.
+    EXPECT_TRUE(scand3d::feature::matchBruteForce(query, train, MatchOptions{80, false, 0}).empty());
+
+    // With it the agreeing direction wins the tie and the match survives.
+    const auto matches = scand3d::feature::matchBruteForce(query, train, MatchOptions{80, false, 8});
+    ASSERT_EQ(1u, matches.size());
+    EXPECT_EQ(1, matches[0].train_index);
+
+    const auto approximate =
+        scand3d::feature::matchApproximate(query, train, MatchOptions{80, false, 8});
+    ASSERT_EQ(1u, approximate.size());
+    EXPECT_EQ(1, approximate[0].train_index);
+}
+
 TEST(FeatureMatching, RatioTestRejectsAmbiguousDescriptors) {
     FeatureSet query;
     query.keypoints = {{0.0, 0.0, 1.0, 0.0, 1.0}};

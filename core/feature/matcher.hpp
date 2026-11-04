@@ -18,6 +18,11 @@ struct MatchOptions {
 
     /// Also require the reverse match to agree. Costs a second pass over the candidates.
     bool cross_check = false;
+
+    /// Descriptor bits charged for a 90 degree disagreement between two edge keypoints' gradient
+    /// directions (D054). A point on a contour is ambiguous along it; this breaks exactly those
+    /// ties without rejecting a match over a camera rotation. Zero disables the term.
+    int edge_direction_weight = 8;
 };
 
 /// Exhaustive Hamming search with Lowe's ratio test (roadmap 3.3). Used as the reference the

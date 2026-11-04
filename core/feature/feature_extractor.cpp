@@ -145,9 +145,12 @@ FeatureSet extractFeatures(const GrayImage& image, const FeatureParams& params) 
         const int orientation_radius = std::max(
             2, static_cast<int>(std::lround(params.orientation_radius_px * level.scale)));
 
-        auto add_candidate = [&](int x_px, int y_px, double response) {
+        auto add_candidate = [&](int x_px, int y_px, double response, bool is_edge = false,
+                                 double edge_direction = 0.0) {
             Candidate candidate;
             candidate.keypoint.scale = magnification;
+            candidate.keypoint.is_edge = is_edge;
+            candidate.keypoint.edge_direction_rad = edge_direction;
             // Level pixel centres map back to level-0 pixel centres, not to pixel corners.
             candidate.keypoint.x_px = (static_cast<double>(x_px) + 0.5) * magnification - 0.5;
             candidate.keypoint.y_px = (static_cast<double>(y_px) + 0.5) * magnification - 0.5;
@@ -189,7 +192,9 @@ FeatureSet extractFeatures(const GrayImage& image, const FeatureParams& params) 
                 level.image, edges, covered, spacing_px, params.edge_min_magnitude,
                 params.max_edge_points_per_level);
             for (const EdgeSample& sample : samples) {
-                add_candidate(sample.x_px, sample.y_px, static_cast<double>(sample.magnitude));
+                add_candidate(
+                    sample.x_px, sample.y_px, static_cast<double>(sample.magnitude), true,
+                    edgeDirectionAt(level.image, sample.x_px, sample.y_px));
             }
         }
     }

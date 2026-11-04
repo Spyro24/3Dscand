@@ -8,7 +8,7 @@ namespace scand3d::feature {
 namespace {
 
 constexpr char kMagic[8] = {'S', '3', 'D', 'F', 'E', 'A', 'T', '1'};
-constexpr std::uint32_t kVersion = 1;
+constexpr std::uint32_t kVersion = 2;
 constexpr std::uint32_t kMaxFeatures = 1'000'000;
 
 }  // namespace
@@ -30,12 +30,14 @@ bool saveFeatures(const std::string& path, const FeatureSet& features) {
 
     for (std::size_t i = 0; i < features.keypoints.size(); ++i) {
         const Keypoint& keypoint = features.keypoints[i];
-        const auto record = std::array<float, 5>{
+        const auto record = std::array<float, 7>{
             static_cast<float>(keypoint.x_px),
             static_cast<float>(keypoint.y_px),
             static_cast<float>(keypoint.scale),
             static_cast<float>(keypoint.angle_rad),
             static_cast<float>(keypoint.response),
+            static_cast<float>(keypoint.edge_direction_rad),
+            keypoint.is_edge ? 1.0f : 0.0f,
         };
         out.write(reinterpret_cast<const char*>(record.data()),
                   static_cast<std::streamsize>(sizeof(float) * record.size()));
@@ -63,7 +65,7 @@ bool loadFeatures(const std::string& path, FeatureSet& features) {
     }
 
     constexpr std::streamoff kHeaderBytes = 8 + 4 + 4;
-    constexpr std::streamoff kRecordBytes = sizeof(float) * 5 + 32;
+    constexpr std::streamoff kRecordBytes = sizeof(float) * 7 + 32;
     in.seekg(0, std::ios::end);
     const std::streamoff file_bytes = in.tellg();
     if (file_bytes != kHeaderBytes + static_cast<std::streamoff>(count) * kRecordBytes) {
@@ -75,7 +77,7 @@ bool loadFeatures(const std::string& path, FeatureSet& features) {
     loaded.keypoints.reserve(count);
     loaded.descriptors.reserve(count);
     for (std::uint32_t i = 0; i < count; ++i) {
-        std::array<float, 5> record{};
+        std::array<float, 7> record{};
         in.read(reinterpret_cast<char*>(record.data()),
                 static_cast<std::streamsize>(sizeof(float) * record.size()));
         Descriptor descriptor{};
@@ -90,6 +92,8 @@ bool loadFeatures(const std::string& path, FeatureSet& features) {
         keypoint.scale = record[2];
         keypoint.angle_rad = record[3];
         keypoint.response = record[4];
+        keypoint.edge_direction_rad = record[5];
+        keypoint.is_edge = record[6] != 0.0f;
         loaded.keypoints.push_back(keypoint);
         loaded.descriptors.push_back(descriptor);
     }

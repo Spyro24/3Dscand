@@ -46,6 +46,10 @@ EdgeMap detectEdges(const GrayImage& image, const EdgeParams& params = {});
 /// Sobel gradient magnitude at one pixel, on the same 0..255 scale as `EdgeMap::magnitude`.
 int gradientMagnitudeAt(const GrayImage& image, int x_px, int y_px);
 
+/// Sobel gradient direction at one pixel, in [0, pi). Folded to half a turn because the sign of the
+/// gradient says which side of an edge is brighter, and that flips between views.
+double edgeDirectionAt(const GrayImage& image, int x_px, int y_px);
+
 /// True when the gradients in a small window around the pixel all point the same way, which makes
 /// the pixel a straight one-dimensional contour. A patch descriptor there matches any position
 /// along the line, so it is not worth a keypoint; a corner-free but two-dimensional region still

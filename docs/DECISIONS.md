@@ -802,3 +802,28 @@ here with its version, license and reason (agents.md sections 2 and 7).
   feature index and read past its end. `Session::snapshot` now sizes the flags to the features and
   `Tracker::track` walks the shorter of the two; `Session.SnapshotWithoutAMapRefusesToTrackInstead
   ofCrashing` covers the state the app is in at the start of every scan.
+
+## D054 - the matcher uses an edge keypoint's gradient direction
+
+- **Decision:** `Keypoint` carries `edge_direction_rad` (the Sobel gradient direction folded to
+  [0, pi), because the sign only says which side is brighter and flips between views) and `is_edge`.
+  `MatchOptions::edge_direction_weight` (8) charges descriptor bits for the angular disagreement
+  between two edge keypoints before the best/second-best ranking and the ratio test, in both the
+  exhaustive and the approximate matcher; `edgeDirectionAt` supplies the direction, and the stored
+  feature format moved to version 2 to keep the two new fields.
+- **Reason:** D053 measured contour points lowering match precision from 0.95 to 0.89 because two
+  points on the same straight contour produce the same BRIEF string. The gradient direction is the
+  one thing that separates them, and since a camera rotation moves both views' directions equally,
+  a weighted comparison is safe where a fixed angular threshold would reject correct matches.
+- **Verified:** `FeatureMatching.EdgeDirectionBreaksADescriptorTie` gives a query and two train
+  keypoints with identical descriptors 0 and 85 degrees away: without the weight the ratio test
+  rejects the query, with it both matchers return the agreeing keypoint.
+  `EdgePoints.AddSupportWhereCornersAloneFindAlmostNothing` checks every contour keypoint reports an
+  axis-aligned direction. Replaying the bright real scan with contour points forced
+  (`tracking_report /tmp/bright480 8 357.4 1000000 1`) now gives 117 map points and 3 of 18 live
+  frames tracked, against 149 points and 1 of 18 when the direction was ignored. With edges at their
+  default (corner-poor only) the same scan is unchanged at 3 views / 101 points / 2 of 18, and the
+  0.95 precision fixture holds.
+- **Consequence:** the direction is a penalty, never a hard rejection, so a fast rotation cannot
+  throw away a correct match, and a straight contour still contributes only sparse points. A feature
+  file written by an older build is rejected by the version check rather than misread.

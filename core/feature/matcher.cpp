@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <unordered_map>
@@ -23,12 +24,38 @@ std::uint32_t readBlock(const Descriptor& descriptor, int block) {
            (static_cast<std::uint32_t>(descriptor[offset + 3]) << 24);
 }
 
+constexpr double kHalfPi = 1.5707963267948966;
+constexpr double kPi = 3.14159265358979323846;
+
+/// Hamming bits, plus a penalty when both keypoints are edge points whose gradient directions
+/// disagree. Two points on the same straight contour have identical surroundings, so the direction
+/// is the only thing that says which of them a query belongs to.
+int matchDistance(
+    const Keypoint& query_keypoint,
+    const Descriptor& query,
+    const Keypoint& train_keypoint,
+    const Descriptor& train,
+    int direction_weight) {
+    int distance = hammingDistance(query, train);
+    if (direction_weight > 0 && query_keypoint.is_edge && train_keypoint.is_edge) {
+        double delta =
+            std::fabs(query_keypoint.edge_direction_rad - train_keypoint.edge_direction_rad);
+        if (delta > kHalfPi) {
+            delta = std::fabs(kPi - delta);
+        }
+        distance += static_cast<int>(std::lround(direction_weight * delta / kHalfPi));
+    }
+    return distance;
+}
+
 /// Best and second-best among the given train indices. Returns false when there is no second
 /// distinct match, because the ratio test would be meaningless.
 bool bestTwo(
+    const Keypoint& query_keypoint,
     const Descriptor& query,
     const FeatureSet& train,
     const std::vector<int>& candidates,
+    int direction_weight,
     int& best_index,
     int& best_distance,
     int& second_distance) {
@@ -39,7 +66,10 @@ bool bestTwo(
     second_distance = std::numeric_limits<int>::max();
 
     for (const int index : candidates) {
-        const int distance = hammingDistance(query, train.descriptors[static_cast<std::size_t>(index)]);
+        const std::size_t train_index = static_cast<std::size_t>(index);
+        const int distance = matchDistance(
+            query_keypoint, query, train.keypoints[train_index], train.descriptors[train_index],
+            direction_weight);
         if (best_index < 0) {
             best_distance = distance;
             best_index = index;
@@ -81,7 +111,9 @@ std::vector<FeatureMatch> matchBruteForce(
             int best_query = -1;
             int best_distance = 0;
             for (std::size_t i = 0; i < query.descriptors.size(); ++i) {
-                const int distance = hammingDistance(query.descriptors[i], train.descriptors[j]);
+                const int distance = matchDistance(
+                    query.keypoints[i], query.descriptors[i], train.keypoints[j],
+                    train.descriptors[j], options.edge_direction_weight);
                 if (best_query < 0 || distance < best_distance) {
                     best_query = static_cast<int>(i);
                     best_distance = distance;
@@ -98,7 +130,8 @@ std::vector<FeatureMatch> matchBruteForce(
         int best_index = -1;
         int best_distance = 0;
         int second_distance = 0;
-        if (!bestTwo(query.descriptors[i], train, all_indices, best_index, best_distance,
+        if (!bestTwo(query.keypoints[i], query.descriptors[i], train, all_indices,
+                     options.edge_direction_weight, best_index, best_distance,
                      second_distance)) {
             continue;
         }
@@ -163,7 +196,8 @@ std::vector<FeatureMatch> matchApproximate(
         int best_index = -1;
         int best_distance = 0;
         int second_distance = 0;
-        if (!bestTwo(query.descriptors[i], train, *pool, best_index, best_distance,
+        if (!bestTwo(query.keypoints[i], query.descriptors[i], train, *pool,
+                     options.edge_direction_weight, best_index, best_distance,
                      second_distance)) {
             continue;
         }

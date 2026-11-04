@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -112,6 +113,22 @@ TEST(EdgePoints, AddSupportWhereCornersAloneFindAlmostNothing) {
         EXPECT_TRUE(on_contour) << "edge point off the contour at " << x << "," << y;
     }
     EXPECT_EQ(with.keypoints.size(), with.descriptors.size());
+
+    // Every contour point carries the gradient direction the matcher uses to tell points on the
+    // same line apart. The rectangle's sides are axis aligned: vertical sides have a horizontal
+    // gradient (0) and horizontal sides a vertical one (pi/2).
+    int edge_points = 0;
+    for (const auto& keypoint : with.keypoints) {
+        if (!keypoint.is_edge) {
+            continue;
+        }
+        ++edge_points;
+        const double direction = keypoint.edge_direction_rad;
+        const bool axis_aligned = std::fabs(direction) < 0.05 ||
+                                  std::fabs(direction - 1.5708) < 0.05;
+        EXPECT_TRUE(axis_aligned) << "edge direction " << direction;
+    }
+    EXPECT_GT(edge_points, 5);
 }
 
 TEST(EdgePoints, AreDeterministic) {

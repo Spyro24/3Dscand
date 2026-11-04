@@ -12,6 +12,14 @@ struct Keypoint {
     double scale = 1.0;      // detection scale relative to level 0
     double angle_rad = 0.0;  // intensity-centroid orientation, steers the descriptor
     double response = 0.0;   // corner strength, used for cross-scale suppression
+
+    /// Gradient direction of an edge keypoint, in [0, pi). Two points on the same contour have the
+    /// same direction, and that is what tells them apart along it (D054); meaningless unless
+    /// `is_edge`.
+    double edge_direction_rad = 0.0;
+
+    /// True when the keypoint came from the edge map rather than the corner detector.
+    bool is_edge = false;
 };
 
 /// One 256-bit BRIEF descriptor.

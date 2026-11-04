@@ -75,6 +75,26 @@ int gradientMagnitudeAt(const GrayImage& image, int x_px, int y_px) {
     return scaledMagnitude(sobel(image, x_px, y_px));
 }
 
+double edgeDirectionAt(const GrayImage& image, int x_px, int y_px) {
+    if (image.empty() || x_px < 1 || y_px < 1 || x_px >= image.width_px - 1 ||
+        y_px >= image.height_px - 1) {
+        return 0.0;
+    }
+    const Gradient gradient = sobel(image, x_px, y_px);
+    if (gradient.x == 0 && gradient.y == 0) {
+        return 0.0;
+    }
+    constexpr double kPi = 3.14159265358979323846;
+    double angle = std::atan2(static_cast<double>(gradient.y), static_cast<double>(gradient.x));
+    if (angle < 0.0) {
+        angle += kPi;
+    }
+    if (angle >= kPi) {
+        angle -= kPi;
+    }
+    return angle;
+}
+
 bool isStraightContour(
     const GrayImage& image, int x_px, int y_px, int radius_px, double max_ratio) {
     double sum_xx = 0.0;
