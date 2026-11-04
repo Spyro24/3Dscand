@@ -28,6 +28,11 @@ class CaptureTestReceiver : BroadcastReceiver() {
                 Log.i(LOG_TAG, "stop requested, frames=${actions.savedFrames()}")
             }
 
+            LOSS -> {
+                actions.simulateCameraLoss()
+                Log.i(LOG_TAG, "simulated camera loss requested")
+            }
+
             else -> Log.i(LOG_TAG, "status frames=${actions.savedFrames()}")
         }
     }
@@ -37,5 +42,6 @@ class CaptureTestReceiver : BroadcastReceiver() {
         const val COMMAND = "cmd"
         const val START = "start"
         const val STOP = "stop"
+        const val LOSS = "loss"
     }
 }

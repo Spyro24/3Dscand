@@ -39,6 +39,7 @@ class CaptureViewModel(application: Application) :
     }
 
     fun onPermissionGranted() {
+        Log.i(LOG_TAG, "onPermissionGranted controller=${controller != null} phase=${_state.value.phase}")
         if (controller != null) {
             return
         }
@@ -62,13 +63,25 @@ class CaptureViewModel(application: Application) :
 
     fun onPreviewTextureReady(texture: SurfaceTexture) {
         val controller = controller ?: return
+        // A surface can arrive while the app is showing a terminal state; starting the camera
+        // then would silently undo a camera-loss screen the user has not dismissed yet.
+        val phase = _state.value.phase
+        if (phase == CapturePhase.CameraLost || phase == CapturePhase.Failed) {
+            Log.i(LOG_TAG, "ignoring preview surface while phase=$phase")
+            return
+        }
+        Log.i(LOG_TAG, "preview surface ready, starting camera")
         controller.start(Surface(texture))
         _state.value = _state.value.copy(phase = CapturePhase.Preview, message = null)
     }
 
     fun toggleCapture() {
-        // Logged so a capture that nobody asked for is traceable to a caller.
-        Log.i(LOG_TAG, "toggleCapture phase=${_state.value.phase} frames=${_state.value.savedFrames}")
+        // Logged with its caller so a capture that nobody asked for is traceable.
+        val caller = Throwable().stackTrace.getOrNull(2)?.toString() ?: "unknown"
+        Log.i(
+            LOG_TAG,
+            "toggleCapture phase=${_state.value.phase} frames=${_state.value.savedFrames} caller=$caller",
+        )
         if (_state.value.phase == CapturePhase.Capturing) {
             stopCapture()
         } else {
@@ -107,6 +120,9 @@ class CaptureViewModel(application: Application) :
     override fun savedFrames(): Int = _state.value.savedFrames
 
     fun retry() {
+        // Logged with its caller so a retry nobody asked for is traceable.
+        val caller = Throwable().stackTrace.getOrNull(2)?.toString() ?: "unknown"
+        Log.i(LOG_TAG, "retry requested from phase=${_state.value.phase} caller=$caller")
         releaseController()
         _state.value = CaptureUiState(phase = CapturePhase.WaitingForPermission)
         onPermissionGranted()
@@ -141,7 +157,14 @@ class CaptureViewModel(application: Application) :
     }
 
     override fun onCameraLost(reason: String) {
+        // The controller has already torn the device down; only the UI state is left to settle.
+        closeBenchmark()
+        Log.i(LOG_TAG, "camera lost: $reason")
         _state.value = _state.value.copy(phase = CapturePhase.CameraLost, message = reason)
+    }
+
+    override fun simulateCameraLoss() {
+        controller?.simulateCameraLoss()
     }
 
     override fun onFailure(message: String) {

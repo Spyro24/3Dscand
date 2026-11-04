@@ -75,6 +75,9 @@ written into the manifest, because reconstruction depends on them staying consta
 
 - Phase 0 complete: project, native bridge, local test harnesses, synthetic scenes, benchmarks,
   this document.
-- Phase 1 in progress: Camera2 capture with locked settings, monochrome preview and session
-  storage.
+- Phase 1 complete: Camera2 capture with locked settings, monochrome preview, session storage,
+  and camera-loss/permission-denied handling, all exercised on the test device. A lost camera is
+  torn down on the camera thread, the UI shows the `CameraLost` screen, and Retry builds a fresh
+  controller and re-locks; a preview surface arriving while the UI is in a terminal state is
+  ignored (D017).
 - Everything after Phase 1 is unimplemented; `roadmap.md` is the source of truth.

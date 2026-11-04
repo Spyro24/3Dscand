@@ -32,7 +32,7 @@ Goal: a stable camera session with a monochrome live preview and saved photos.
 - [x] 1.5 Save frames as JPEG with EXIF and a session manifest (relative paths only)
 - [x] 1.6 Lost-camera and permission-denied handling
 
-**Acceptance:** preview runs at 30 fps or more on the target device; 100 frames saved with correct metadata; preview is strictly grayscale.
+**Acceptance:** preview runs at 30 fps or more on the target device; 100 frames saved with correct metadata; preview is strictly grayscale; a camera loss shows the CameraLost screen and Retry restores a locked preview that keeps saving frames (observed on the test device, see `docs/benchmarks/phase1-capture-benchmark.md`).
 
 ---
 

@@ -52,12 +52,13 @@ class SessionStore(rootDirectory: File) {
     fun writeManifest(
         settings: LockedCaptureSettings?,
         deviceModel: String,
-        savedFrames: Int,
     ) {
         val manifest = JSONObject()
             .put("schema", SCHEMA_VERSION)
             .put("device_model", deviceModel)
-            .put("saved_frames", savedFrames)
+            // Derived from the entries themselves: a separate counter drifts when a still that was
+            // already in flight lands after capture stopped, leaving a file the manifest omits.
+            .put("saved_frames", frames.length())
             .put("frames", frames)
 
         if (settings != null) {

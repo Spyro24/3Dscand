@@ -126,6 +126,17 @@ here with its version, license and reason (agents.md sections 2 and 7).
 - **Consequence:** `DateTime` is the wall clock at capture, not the sensor timestamp, because
   `SENSOR_TIMESTAMP` is boot-relative.
 
+### D017 - Camera-loss tests fire the real device callback; terminal states ignore late surfaces
+- **Reason:** This phone's HAL cannot be made to drop a capture session from `adb`, and a second
+  device is out of scope (D010). The debug-only `loss` command therefore posts the controller's
+  stored `CameraDevice.StateCallback.onDisconnected(device)` onto the camera thread, the same
+  entry point the OS uses, so the production teardown, `CameraLost` state and Retry action are
+  what a device test exercises. The receiver and the bridge exist only in debug builds.
+- **Consequence:** `CaptureViewModel.onPreviewTextureReady` ignores surfaces while the state is
+  `CameraLost` or `Failed`. Without that guard a surface callback arriving after teardown
+  restarted the camera and silently replaced the loss screen with a live preview, so the user
+  never saw the error they should retry from.
+
 ### D016 - Debug-only broadcast trigger for device tests
 - **Reason:** Driving capture through screen taps was unreliable on the test device. A receiver in
   the `debug` source set (`com.scand3d.debug.CaptureTestReceiver`, explicit component broadcast)

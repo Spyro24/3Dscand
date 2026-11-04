@@ -66,6 +66,7 @@ class CameraCaptureController(
     private var cameraThread: HandlerThread? = null
     private var handler: Handler? = null
     private var cameraDevice: CameraDevice? = null
+    private var deviceStateCallback: CameraDevice.StateCallback? = null
     private var captureSession: CameraCaptureSession? = null
     private var imageReader: ImageReader? = null
     private var previewSurface: Surface? = null
@@ -147,31 +148,59 @@ class CameraCaptureController(
         }
 
         try {
-            cameraManager.openCamera(id, object : CameraDevice.StateCallback() {
+            val callback = object : CameraDevice.StateCallback() {
                 override fun onOpened(device: CameraDevice) {
                     cameraDevice = device
                     createSession(device)
                 }
 
                 override fun onDisconnected(device: CameraDevice) {
-                    Log.w(LOG_TAG, "camera disconnected")
-                    device.close()
-                    cameraDevice = null
-                    captureSession = null
-                    listener.onCameraLost("camera disconnected")
+                    handleCameraLoss("camera disconnected", device)
                 }
 
                 override fun onError(device: CameraDevice, error: Int) {
-                    Log.e(LOG_TAG, "camera error $error")
-                    device.close()
-                    cameraDevice = null
-                    captureSession = null
-                    listener.onCameraLost("camera error $error")
+                    handleCameraLoss("camera error $error", device)
                 }
-            }, cameraHandler)
+            }
+            // Kept so a debug build can fire this very callback when the HAL cannot be forced
+            // to drop the session from adb; the teardown and UI path stay production code.
+            deviceStateCallback = callback
+            cameraManager.openCamera(id, callback, cameraHandler)
         } catch (t: Throwable) {
             listener.onFailure(t.message ?: "openCamera failed")
         }
+    }
+
+    /**
+     * The single teardown path for a dead camera. Both OS callbacks and the debug hook land here,
+     * so what a device test exercises is what a real disconnect runs.
+     */
+    private fun handleCameraLoss(reason: String, device: CameraDevice?) {
+        Log.w(LOG_TAG, "camera lost: $reason")
+        capturing.set(false)
+        flushManifest(shutdownWriter = true)
+        runCatching { captureSession?.close() }
+        runCatching { device?.close() }
+        runCatching { imageReader?.close() }
+        captureSession = null
+        cameraDevice = null
+        imageReader = null
+        previewSurface = null
+        deviceStateCallback = null
+        cameraThread?.quitSafely()
+        listener.onCameraLost(reason)
+    }
+
+    /** Debug hook: delivers the OS disconnect event from the camera thread. */
+    fun simulateCameraLoss() {
+        val cameraHandler = handler
+        val device = cameraDevice
+        val callback = deviceStateCallback
+        if (cameraHandler == null || device == null || callback == null) {
+            listener.onCameraLost("camera not open")
+            return
+        }
+        cameraHandler.post { callback.onDisconnected(device) }
     }
 
     fun startCapture(store: SessionStore) {
@@ -194,22 +223,37 @@ class CameraCaptureController(
     private fun flushManifest(shutdownWriter: Boolean) {
         val store = sessionStore
         val settings = lockedSettings
-        val count = savedFrames.get()
-        fileWriter.execute {
-            store?.writeManifest(
-                settings = settings,
-                deviceModel = android.os.Build.MODEL,
-                savedFrames = count,
-            )
-            if (shutdownWriter) {
-                fileWriter.shutdown()
+        val queued = runCatching {
+            fileWriter.execute {
+                store?.writeManifest(settings, android.os.Build.MODEL)
+                if (shutdownWriter) {
+                    fileWriter.shutdown()
+                }
+            }
+        }.isSuccess
+
+        // After a loss the writer may already be shut down; write inline rather than lose the
+        // frames that did reach disk.
+        if (!queued && store != null) {
+            runCatching {
+                store.writeManifest(settings, android.os.Build.MODEL)
+                if (shutdownWriter) {
+                    fileWriter.shutdown()
+                }
             }
         }
     }
 
     fun release() {
         val thread = cameraThread
-        handler?.post {
+        val cameraHandler = handler
+        cameraThread = null
+        handler = null
+        if (cameraHandler == null) {
+            thread?.quitSafely()
+            return
+        }
+        cameraHandler.post {
             capturing.set(false)
             flushManifest(shutdownWriter = true)
             runCatching { captureSession?.close() }
@@ -218,10 +262,10 @@ class CameraCaptureController(
             captureSession = null
             cameraDevice = null
             imageReader = null
+            previewSurface = null
+            deviceStateCallback = null
             thread?.quitSafely()
         }
-        cameraThread = null
-        handler = null
     }
 
     private fun ensureThread() {
@@ -498,6 +542,12 @@ class CameraCaptureController(
                 listener.onFrameSaved(index, record)
                 if (index % 10 == 0) {
                     Log.i(LOG_TAG, "saved frame $index")
+                }
+
+                // A still that was already in flight when capture stopped reaches disk after the
+                // stop flush; rewrite the manifest so it lists every frame a reader can find.
+                if (!capturing.get()) {
+                    store.writeManifest(lockedSettings, android.os.Build.MODEL)
                 }
 
                 if (capturing.get()) {

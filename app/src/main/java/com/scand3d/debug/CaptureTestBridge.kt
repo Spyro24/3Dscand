@@ -10,6 +10,9 @@ object CaptureTestBridge {
         fun startCapture()
         fun stopCapture()
         fun savedFrames(): Int
+
+        /** Runs the production camera-loss path (the same callback the OS invokes). */
+        fun simulateCameraLoss()
     }
 
     @Volatile
