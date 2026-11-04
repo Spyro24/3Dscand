@@ -1,0 +1,19 @@
+# Gradle / Android build output
+.gradle/
+build/
+*/build/
+.cxx/
+local.properties
+
+# Dependencies and build tools installed by scripts (see DECISIONS.md)
+.androidsdk/
+.tooling/
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Native builds
+*.o
+*.so.tmp
