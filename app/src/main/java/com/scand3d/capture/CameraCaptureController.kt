@@ -55,6 +55,9 @@ class CameraCaptureController(
 
         /** One downscaled gray preview frame for tracking; at most [ANALYSIS_INTERVAL_MS] apart. */
         fun onAnalysisFrame(width_px: Int, height_px: Int, gray: ByteArray)
+
+        /** A saved frame averages this luma (0..255); reports at most once per capture (D052). */
+        fun onLowLight(mean_luma: Int)
         fun onCameraLost(reason: String)
         fun onFailure(message: String)
     }
@@ -84,6 +87,11 @@ class CameraCaptureController(
 
     /** Long edge of the sensor in millimeters, 0 when the device did not report one. */
     val sensorLongEdgeMm: Double
+
+    /** Longest exposure the sensor accepts for a still, 0 when unreported (D052). */
+    private val maxStillExposureNs: Long
+
+    private var lowLightReported = false
     private val fpsRange: Range<Int>?
     private var cameraThread: HandlerThread? = null
     private var handler: Handler? = null
@@ -125,6 +133,7 @@ class CameraCaptureController(
         var error: String? = null
         var focal_mm = 0f
         var sensor_long_mm = 0.0
+        var max_exposure_ns = 0L
 
         try {
             resolvedId = findBackCameraId()
@@ -140,6 +149,11 @@ class CameraCaptureController(
                 fps = chooseFpsRange(characteristics)
             }
             orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+            // Stills do not have to fit the 30 fps preview, so they may expose for longer; this is
+            // what makes a dim room recordable instead of black (D052).
+            max_exposure_ns =
+                characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.upper
+                    ?: 0L
             focal_mm = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
                 ?.firstOrNull() ?: 0f
             val physical = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
@@ -168,6 +182,7 @@ class CameraCaptureController(
         cameraClockSource = clockSource
         focalLengthMm = focal_mm
         sensorLongEdgeMm = sensor_long_mm
+        maxStillExposureNs = max_exposure_ns
     }
 
     /**
@@ -293,6 +308,7 @@ class CameraCaptureController(
             sessionStore = store
             savedFrames.set(0)
             stillsSinceKept = 0
+            lowLightReported = false
             capturing.set(true)
             captureStill()
         }
@@ -555,6 +571,42 @@ class CameraCaptureController(
             .onFailure { Log.e(LOG_TAG, "locked repeating request failed", it) }
     }
 
+    /**
+     * Still exposure for a locked preview exposure. Stills run one at a time, so they can trade
+     * shutter for light; the multiplier is bounded so a scan does not turn into a blurry smear.
+     */
+    private fun stillExposureNs(locked_ns: Long): Long {
+        if (locked_ns <= 0L) {
+            return 0L
+        }
+        val target = minOf((locked_ns * STILL_LIGHT_GAIN).toLong(), STILL_MAX_EXPOSURE_NS)
+        val capped = if (maxStillExposureNs > 0L) minOf(target, maxStillExposureNs) else target
+        return maxOf(capped, locked_ns)
+    }
+
+    /**
+     * Mean luma of a still, read from a heavily downsampled decode. A frame this dark has no
+     * corners to extract, so the scan that follows can never reconstruct (D052).
+     */
+    private fun meanLuma(bytes: ByteArray): Int {
+        val options = BitmapFactory.Options().apply { inSampleSize = LUMA_SAMPLE_SIZE }
+        val thumb = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return -1
+        return try {
+            val pixels = IntArray(thumb.width * thumb.height)
+            thumb.getPixels(pixels, 0, thumb.width, 0, 0, thumb.width, thumb.height)
+            var sum = 0L
+            for (colour in pixels) {
+                val red = (colour shr 16) and 0xFF
+                val green = (colour shr 8) and 0xFF
+                val blue = colour and 0xFF
+                sum += (red * 77 + green * 150 + blue * 29) shr 8
+            }
+            if (pixels.isEmpty()) -1 else (sum / pixels.size).toInt()
+        } finally {
+            thumb.recycle()
+        }
+    }
+
     private fun applySettings(request: CaptureRequest.Builder, settings: LockedCaptureSettings) {
         request.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_OFF)
         request.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
@@ -587,6 +639,14 @@ class CameraCaptureController(
             addTarget(preview)
             fpsRange?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
             lockedSettings?.let { applySettings(this, it) }
+            // The lock was taken from a preview that has to fit 30 fps, so it is never longer than
+            // about 33 ms. A still may expose for longer, which is the difference between a frame
+            // with corners and a black one in dim light (D052).
+            val still_exposure_ns = lockedSettings?.let { stillExposureNs(it.exposure_ns) } ?: 0L
+            if (still_exposure_ns > 0L) {
+                set(CaptureRequest.SENSOR_EXPOSURE_TIME, still_exposure_ns)
+                set(CaptureRequest.SENSOR_FRAME_DURATION, still_exposure_ns + STILL_FRAME_MARGIN_NS)
+            }
             set(CaptureRequest.JPEG_ORIENTATION, sensorOrientationDeg)
             set(CaptureRequest.JPEG_QUALITY, JPEG_QUALITY)
         }
@@ -699,6 +759,13 @@ class CameraCaptureController(
                 stills_since_kept = stillsSinceKept,
                 kept = savedFrames.get(),
             )
+
+            val mean_luma = meanLuma(bytes)
+            if (mean_luma in 0 until MIN_MEAN_LUMA && !lowLightReported) {
+                lowLightReported = true
+                Log.w(LOG_TAG, "frame luma $mean_luma/255: too dark for features")
+                listener.onLowLight(mean_luma)
+            }
 
             if (!keep) {
                 stillsSinceKept += 1
@@ -844,6 +911,15 @@ class CameraCaptureController(
 
         /** 10 Hz is the most tracking needs; the preview runs at 30. */
         const val ANALYSIS_INTERVAL_MS = 100L
+
+        /** A still may expose this much longer than the 30 fps preview could (D052). */
+        const val STILL_LIGHT_GAIN = 4.0
+        const val STILL_MAX_EXPOSURE_NS = 100_000_000L
+        const val STILL_FRAME_MARGIN_NS = 8_000_000L
+
+        /** Below this a frame is too dark for the feature detector to find corners. */
+        const val MIN_MEAN_LUMA = 45
+        const val LUMA_SAMPLE_SIZE = 32
         const val WARM_UP_FRAMES = 45
         const val MAX_WARM_UP_FRAMES = 240
         const val FPS_WINDOW_NS = 1_000_000_000L

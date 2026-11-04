@@ -26,6 +26,9 @@ data class CaptureUiState(
     val fps: Float = 0f,
     val locked: LockedCaptureSettings? = null,
     val savedFrames: Int = 0,
+
+    /** The saved frames are too dark for the feature detector; the scan needs more light (D052). */
+    val low_light: Boolean = false,
     val sessionRelativePath: String? = null,
     val message: String? = null,
     /** Null until the sensor layer has reported what the device can do. */

@@ -202,6 +202,7 @@ class CaptureViewModel(application: Application) :
         _state.value = _state.value.copy(
             phase = CapturePhase.Capturing,
             savedFrames = 0,
+            low_light = false,
             keyframe_candidates = 0,
             sessionRelativePath = store.relativeRoot,
             message = null,
@@ -778,6 +779,12 @@ class CaptureViewModel(application: Application) :
         }
         val controller = controller ?: return
         tracking.onFrame(gray, width_px, height_px, controller.focalPxFor(maxOf(width_px, height_px)))
+    }
+
+    /** Camera thread: the saved frames are too dark for features, so the scan needs more light. */
+    override fun onLowLight(mean_luma: Int) {
+        Log.w(LOG_TAG, "low light: mean luma $mean_luma/255 in the saved frames")
+        _state.value = _state.value.copy(low_light = true)
     }
 
     override fun onLocked(settings: LockedCaptureSettings) {

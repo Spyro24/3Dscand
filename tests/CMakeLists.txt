@@ -158,3 +158,9 @@ add_executable(mvs_report
     tools/mvs_report.cpp
 )
 target_link_libraries(mvs_report PRIVATE scand3d_test_util)
+
+# Desktop-only real-scan tracking report (roadmap 5.2, D051); never part of the APK.
+add_executable(tracking_report
+    tools/tracking_report.cpp
+)
+target_link_libraries(tracking_report PRIVATE scand3d_test_util)

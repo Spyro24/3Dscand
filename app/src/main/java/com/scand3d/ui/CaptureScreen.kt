@@ -234,7 +234,10 @@ private fun StatusLine(state: CaptureUiState, modifier: Modifier = Modifier) {
     } else {
         null
     }
-    val summary = listOfNotNull(fps, frames, views).joinToString("  ·  ")
+    // A scan in the dark saves frames that no stage can use, so it says so rather than failing
+    // silently later (D052).
+    val light = if (state.low_light) stringResource(R.string.capture_status_too_dark) else null
+    val summary = listOfNotNull(fps, frames, views, light).joinToString("  ·  ")
     val denseProgress = state.dense_progress
     val dense = when {
         denseProgress != null ->

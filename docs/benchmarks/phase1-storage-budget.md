@@ -40,6 +40,40 @@ and 1600 px is the long edge that section names for the MVS input.
 `SessionStoragePolicyTest` (6 tests) covers the keep rule, the fallback cadence, the frame cap and
 the downscale arithmetic.
 
+## Low-light input (D052)
+
+Measured on the same phone, same room, 4 November 2026.
+
+Method: start a 20 s capture, then pull the stored keyframes and take the mean of the luma channel
+with PIL; the exposure lock is the one the app logged.
+
+| Metric | Locked preview exposure | Stills with D052 |
+| --- | --- | --- |
+| Exposure | 30 ms | 100 ms (cap) |
+| ISO | 1600 | 1600 |
+| Mean luma | 13-21/255 | 33-40/255 |
+| FAST corners at 480 px | 0 | 160-250 per frame |
+
+The still is still about five times too dark for a comfortable map, and the capture screen now says
+"Too dark: add light" instead of silently storing frames no stage can use.
+
+## Why the overlay still does not line up
+
+`tracking_report` replays a saved session through the map and then through `sfm::Tracker` on the
+host. Replaying the brightest real session (`20261104-205309`, 26 keyframes) with a growing number
+of map views:
+
+| Map views | Registered | Points | Live frames tracked |
+| --- | --- | --- | --- |
+| 4 | 3 | 23 | 0 of 22 |
+| 8 | 3 | 101 | 2 of 18 |
+| 12 | 4 | 101 | 0 of 14 |
+| 24 | 4 | 101 | 0 of 2 |
+
+Feeding more views does not grow the map: registration stops after four views, so raising
+`MAX_RECONSTRUCTION_FRAMES` would only cost time. A dark session registers 0 views and has no map
+at all, which is what an empty overlay looks like from the outside.
+
 ## Caveats
 
 - Nothing is deleted: earlier sessions stay on the device (371 MB on the test phone) until the user

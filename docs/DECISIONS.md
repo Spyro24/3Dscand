@@ -745,3 +745,22 @@ here with its version, license and reason (agents.md sections 2 and 7).
   keyframes gets no tracked pose and keeps the IMU fallback. A pose older than 600 ms is treated as
   stale, so a lost track falls back instead of showing a confidently wrong overlay. Alignment to a
   real object (roadmap 5.5, about 10 px after 10 s of motion) still needs a device measurement.
+
+## D052 - stills expose longer than the preview, and a dark frame says so
+
+- **Decision:** a still capture raises the locked exposure by up to four times, capped at 100 ms and
+  at the sensor's own `SENSOR_INFO_EXPOSURE_TIME_RANGE` maximum, and sets the matching frame
+  duration. Every still's mean luma is measured from a 1/32 decode; the first frame below 45/255
+  reports `onLowLight`, which the capture screen shows as "Too dark: add light".
+- **Reason:** the exposure lock is taken from the preview, which has to fit 30 fps, so it can never
+  be longer than about 33 ms. Real scans on the SM-G930F came out at 30 ms / ISO 1600 with a mean
+  luma of 13-21 of 255 - the saved keyframes had no corners, the sparse map stayed empty, and the
+  overlay had nothing to draw, which is what "the cloud does not overlap the real world" turned out
+  to be. A still is captured alone, so it can trade shutter time for light.
+- **Verified:** the replay of the last real scan (`tests/tools/tracking_report`, 23 keyframes) shows
+  zero views accepted at that brightness, which pins the empty map on the data rather than on the
+  tracker. Exposure range and luma numbers are logged; a capture in the same room is measured after
+  the change (`docs/benchmarks/phase1-storage-budget.md`).
+- **Consequence:** in dim light a still may blur if the phone moves during the longer exposure, so
+  the multiplier is bounded at 100 ms. The warning is per capture, and it does not block saving:
+  frames are still recorded, they simply tell the user the scan will not reconstruct.
