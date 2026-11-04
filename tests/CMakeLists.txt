@@ -37,6 +37,15 @@ add_library(scand3d_test_util STATIC
     "${SCAND3D_CORE_DIR}/sensors/keyframe_prior.cpp"
     "${SCAND3D_CORE_DIR}/sensors/mahony_filter.cpp"
     "${SCAND3D_CORE_DIR}/sensors/tilt_orientation.cpp"
+    "${SCAND3D_CORE_DIR}/sfm/bundle_adjustment.cpp"
+    "${SCAND3D_CORE_DIR}/sfm/keyframe_selection.cpp"
+    "${SCAND3D_CORE_DIR}/sfm/map_store.cpp"
+    "${SCAND3D_CORE_DIR}/sfm/pipeline.cpp"
+    "${SCAND3D_CORE_DIR}/sfm/pnp.cpp"
+    "${SCAND3D_CORE_DIR}/sfm/pose.cpp"
+    "${SCAND3D_CORE_DIR}/sfm/report.cpp"
+    "${SCAND3D_CORE_DIR}/sfm/triangulation.cpp"
+    synthetic/sfm_scan.cpp
     synthetic/synthetic_scene.cpp
     tools/match_overlay.cpp
     tools/pgm.cpp
@@ -72,6 +81,12 @@ add_executable(geometry_test
 target_link_libraries(geometry_test PRIVATE scand3d_test_util GTest::gtest_main)
 gtest_discover_tests(geometry_test)
 
+add_executable(sfm_test
+    native/sfm_test.cpp
+)
+target_link_libraries(sfm_test PRIVATE scand3d_test_util GTest::gtest_main)
+gtest_discover_tests(sfm_test)
+
 add_executable(match_tool_test
     native/match_tool_test.cpp
 )
@@ -83,6 +98,12 @@ add_executable(match_visualizer
     tools/match_visualizer.cpp
 )
 target_link_libraries(match_visualizer PRIVATE scand3d_test_util)
+
+# Desktop-only reconstruction report (roadmap 4.6); never part of the APK.
+add_executable(sfm_report
+    tools/sfm_report.cpp
+)
+target_link_libraries(sfm_report PRIVATE scand3d_test_util)
 
 add_executable(synthetic_scene_test
     native/synthetic_scene_test.cpp

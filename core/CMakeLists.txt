@@ -24,6 +24,14 @@ add_library(scand3d_core SHARED
     sensors/keyframe_prior.cpp
     sensors/mahony_filter.cpp
     sensors/tilt_orientation.cpp
+    sfm/bundle_adjustment.cpp
+    sfm/keyframe_selection.cpp
+    sfm/map_store.cpp
+    sfm/pipeline.cpp
+    sfm/pnp.cpp
+    sfm/pose.cpp
+    sfm/report.cpp
+    sfm/triangulation.cpp
 )
 
 target_include_directories(scand3d_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
