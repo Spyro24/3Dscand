@@ -425,12 +425,13 @@ here with its version, license and reason (agents.md sections 2 and 7).
   2 views and 1 point across every scene setting tried, while the same seed pair triangulated to
   0.5 px mean reprojection. The Phase 4 pipeline was validated on exact lattice tracks, so it is
   left unchanged.
-- **Consequence:** the session reports its seed pair at 0.5 px mean reprojection on the 24-view
-  turntable, but registers no third view: neighbouring rendered pairs give too few geometrically
-  consistent matches (32 and 227 inliers across the same ring). Multi-view growth and the 90 percent
-  real-scan number stay open, so 5.2's tracking half remains `[~]`. The seed map covers a mostly
-  planar box face, so a tracked pose is fixed only up to the planar flip; the tests assert that
-  tracking returns a pose and refuses a featureless frame, not a rotation bound.
+- **Consequence:** the session registers three of twenty-four views at 0.375 px mean reprojection
+  on the 24-view turntable (D037). Growth stops there because the ring's weakest neighbouring pair
+  yields about 16 geometrically consistent matches, too few to place another view by PnP or to
+  anchor a chained relative pose. The 90 percent real-scan number stays open, so 5.2's tracking half
+  remains `[~]`. The seed map covers a mostly planar box face, so a tracked pose is fixed only up to
+  the planar flip; the tests assert that tracking returns a pose and refuses a featureless frame,
+  not a rotation bound.
 
 ### D036 - The app reconstructs from saved keyframes decoded at 480 px
 - **Decision:** `ReconstructionRunner` decodes up to 12 evenly spaced keyframes of the newest
@@ -446,3 +447,21 @@ here with its version, license and reason (agents.md sections 2 and 7).
 - **Consequence:** reconstruction is a debug-triggered action, not a review screen: it handles the
   newest session only and reports nothing when fewer than two frames are usable. The overlay still
   publishes on the IMU pose (D032) until a tracked pose is wired into the display pose.
+
+### D037 - Seeds are scored by third-view support and thin maps bootstrap by chaining
+- **Decision:** every candidate seed pair builds its own map; each map is scored by how many of its
+  points the best neighbouring pair can actually match, and only the best few are grown. A view is
+  registered by PnP when the map supports it, and otherwise by chaining that pair's own relative pose
+  onto the registered reference, scaled by the median ratio of map depth to relative depth over the
+  correspondences the map already knows. Bundle adjustment runs only after a third view registers.
+- **Reason:** with exact correspondences the seeder is sound (162 of 162 points at 0.23 px), but on
+  real matches the same pair can land on the planar mirror branch about 20 degrees off and keep only
+  a handful of points. Scoring by support picks the branch that can grow instead of the one with the
+  most matches, which is what the previous count-order retry did. A two-view map cannot place a third
+  view by PnP at all, and D029 records that bundle adjustment on two views can trade the
+  reconstruction for a mirrored one.
+- **Consequence:** on the 24-view turntable the session now registers three views at 0.375 px mean
+  reprojection and 51 points, deterministically for that scene seed, where the previous commit
+  registered only the seed pair. Further growth is blocked by the fixture rather than the loop: the
+  weakest neighbouring pair has about 16 matches, so nothing anchors the next pose. The same loop
+  needs a capture with denser matches, which only real frames can show.

@@ -145,10 +145,12 @@ incremental registration, the bridge and JNI expose it (`reconstructionCreate/Ad
 PointCount/CopyPoints/TrackPose`), and `ReconstructionRunner` decodes the newest session's keyframes
 to 480 px gray, scales the overlay intrinsics to that size, reconstructs and loads the points into
 the overlay. It is requested with `adb shell am broadcast -a com.scand3d.debug.CAPTURE --es cmd
-reconstruct`. What it measures on the synthetic turntable is the seed pair only: 0.5 px mean
-reprojection, but no further view registers, because the speckle scenes yield too few geometrically
-consistent matches between neighbouring views (D035, D036). The overlay therefore still draws the
-debug cloud by default, and the tracking half of 5.2 stays `[~]` until a real scan registers.
+reconstruct`. What it measures on the synthetic turntable is three of twenty-four views at 0.375 px
+mean reprojection: the seed pair is chosen because a neighbour can actually use its points, and
+further views chain the pair's own relative pose where the map is too thin for PnP (D037). Growth
+stops at the ring's weakest neighbouring pair, which yields only about 16 geometrically consistent
+matches, so the speckle fixture cannot feed a full scan (D035). The overlay therefore still draws
+the debug cloud by default, and the tracking half of 5.2 stays `[~]` until a real scan registers.
 
 5.3 is implemented natively: `overlay::samplePointColors` takes the per-channel median of a 3x3
 keyframe patch around each point's projection, and `KeyframeColorSampler` decodes the newest saved

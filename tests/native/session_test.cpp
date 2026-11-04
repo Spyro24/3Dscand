@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include "feature/feature_extractor.hpp"
@@ -11,6 +12,7 @@
 #include "sfm/pipeline.hpp"
 #include "sfm/pose.hpp"
 #include "sfm/session.hpp"
+#include "synthetic/sfm_scan.hpp"
 #include "synthetic/synthetic_scene.hpp"
 
 namespace {
@@ -21,6 +23,7 @@ constexpr int kViewCount = 24;
 constexpr int kWidthPx = 800;
 constexpr int kHeightPx = 600;
 constexpr double kFocalPx = 600.0;
+constexpr double kPi = 3.14159265358979323846;
 
 // The Phase 3 textured box carries only a few hundred corners at 12 cells; a reconstruction needs
 // far more support per pair, so these tests use a finer speckle and a smaller angular step.
@@ -96,6 +99,52 @@ TEST(Session, ReportsMatchCountsOnRenderedViews) {
     EXPECT_GT(features[0].size(), 200u);
 }
 
+// Diagnostic only: runs the seeder on exact ground-truth correspondences. If this keeps few points,
+// the seeder is at fault; if it keeps them all, the fault is match quality.
+TEST(Session, ReportsSeedAgainstGroundTruth) {
+    const syn::Scene scene = renderScene(20261104u);
+    const auto first_vertices = syn::visibleSurfaceVertices(scene, 0);
+    const auto second_vertices = syn::visibleSurfaceVertices(scene, 1);
+
+    std::unordered_map<int, const syn::SurfaceVertex*> second_by_id;
+    for (const auto& vertex : second_vertices) {
+        second_by_id[vertex.id] = &vertex;
+    }
+    std::vector<scand3d::geometry::PointCorrespondence> correspondences;
+    for (const auto& vertex : first_vertices) {
+        const auto found = second_by_id.find(vertex.id);
+        if (found == second_by_id.end()) {
+            continue;
+        }
+        correspondences.push_back(
+            {{vertex.projection.u_px, vertex.projection.v_px},
+             {found->second->projection.u_px, found->second->projection.v_px}});
+    }
+
+    const syn::Camera& first_camera = scene.cameras[0];
+    const syn::Camera& second_camera = scene.cameras[1];
+    const auto initialization = scand3d::sfm::initializeTwoView(
+        correspondences,
+        scand3d::sfm::CameraModel{first_camera.focal_px, first_camera.cx_px, first_camera.cy_px},
+        scand3d::sfm::CameraModel{second_camera.focal_px, second_camera.cx_px, second_camera.cy_px});
+
+    const scand3d::sfm::Pose first_truth = syn::poseOf(first_camera);
+    const scand3d::sfm::Pose second_truth = syn::poseOf(second_camera);
+    const scand3d::geometry::Mat3 expected_rotation = scand3d::geometry::matmul3(
+        scand3d::geometry::transpose3(first_truth.rotation), second_truth.rotation);
+    const double rotation_error_deg =
+        scand3d::sfm::rotationAngleRad(initialization.second.rotation, expected_rotation) * 180.0 /
+        kPi;
+    std::printf("seed ground truth: corr %zu valid %d inliers %d points %zu median %.2f px "
+                "rotation error %.2f deg\n",
+                correspondences.size(), initialization.valid ? 1 : 0, initialization.inliers,
+                initialization.points.size(), initialization.median_reprojection_px,
+                rotation_error_deg);
+
+    EXPECT_TRUE(initialization.valid);
+    EXPECT_GT(initialization.inliers, 50);
+}
+
 TEST(Session, ReconstructsARenderedTurntable) {
     const syn::Scene scene = renderScene(20261104u);
     scand3d::sfm::Session session = makeSession();
@@ -104,11 +153,11 @@ TEST(Session, ReconstructsARenderedTurntable) {
     const scand3d::sfm::ReconstructionReport report = session.run();
     std::printf("session: %s\n", report.summary().c_str());
 
-    // The seed pair reconstructs at sub-pixel error. Growth beyond it needs pairs with far more
-    // consistent matches than this speckle fixture produces, which D035 records as open work; the
-    // pipeline's own turntable test covers multi-view growth on exact lattice tracks.
-    EXPECT_GE(report.views_registered, 2) << report.summary();
-    EXPECT_GT(session.pointCount(), 10) << report.summary();
+    // The seed and its neighbours reconstruct at sub-pixel error. Growth stops at the ring's
+    // weakest neighbouring pair, which yields too few matches to place a view (D035, D037). The
+    // scene seed is pinned so this depth is reproducible.
+    EXPECT_GE(report.views_registered, 3) << report.summary();
+    EXPECT_GT(session.pointCount(), 40) << report.summary();
     EXPECT_LT(report.mean_reprojection_px, 3.0) << report.summary();
 }
 
@@ -163,6 +212,8 @@ TEST(Session, TracksAViewAgainstTheMap) {
     scand3d::sfm::Session session = makeSession();
     ASSERT_EQ(addRing(session, scene, kViewCount), kViewCount);
     const scand3d::sfm::ReconstructionReport report = session.run();
+    // This fixture only needs a map to track against, so it does not assert the growth depth that
+    // the turntable test above pins; how far growth reaches depends on the scene's match quality.
     ASSERT_GE(report.views_registered, 2) << report.summary();
     ASSERT_GT(session.pointCount(), 10) << report.summary();
 

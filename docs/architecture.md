@@ -211,10 +211,11 @@ PnP against it. Building the map from global tracks welded inconsistent matches 
 why the session grows view by view (D035). The bridge and JNI mirror the same contract, and the
 runner keeps the core gray by decoding and colour-sampling in the app (D033, D036).
 
-The measured part of this path is the seed pair: on the rendered turntable it reconstructs at 0.5 px
-mean reprojection. Growth registers no third view on that fixture because the synthetic speckle
-gives too few consistent matches between neighbours, so the overlay still draws the debug cloud and
-this stays `[~]` (D035).
+The measured part of this path is three of twenty-four views at 0.375 px mean reprojection: the seed
+pair is chosen because a neighbour can use its points, and further views chain the pair's own
+relative pose where the map is too thin for PnP (D037). Growth stops at the ring's weakest
+neighbouring pair (~16 geometric matches), so the overlay still draws the debug cloud and this stays
+`[~]` (D035, D037).
 
 ## Current phase status
 

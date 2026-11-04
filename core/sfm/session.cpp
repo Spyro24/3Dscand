@@ -25,8 +25,14 @@ constexpr int kMinPairMatches = 12;
 // Capture is sequential, so only neighbouring views are worth matching.
 constexpr int kMaxViewGap = 2;
 
-// Seed pairs tried before the reconstruction is abandoned.
-constexpr int kMaxSeedAttempts = 8;
+// Seed pairs evaluated before the best-scoring ones are grown.
+constexpr int kMaxSeedAttempts = 16;
+
+// Growing costs a PnP pass per candidate view, so only the best few seeds are grown.
+constexpr int kMaxGrowAttempts = 4;
+
+// A neighbour needs at least this many correspondences before PnP can place it.
+constexpr int kMinPnpCorrespondences = 6;
 
 constexpr double kMinParallaxRad = 0.017453292519943295;  // 1 degree
 constexpr double kOutlierReprojectionPx = 4.0;
@@ -86,6 +92,38 @@ std::unordered_map<std::uint64_t, int> featureIndex(const Reconstruction& recons
     return index;
 }
 
+int validPointCount(const Reconstruction& reconstruction) {
+    int count = 0;
+    for (const MapPoint& point : reconstruction.points) {
+        if (point.valid) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+int registeredCount(const Reconstruction& reconstruction) {
+    int count = 0;
+    for (const ViewState& view : reconstruction.views) {
+        if (view.registered) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+/// Chains a pose expressed in the first camera's frame onto a world pose of that camera.
+Pose composePose(const Pose& world_from_first, const Pose& first_from_second) {
+    Pose world;
+    world.rotation = geometry::matmul3(world_from_first.rotation, first_from_second.rotation);
+    const Vec3 offset =
+        geometry::matvec3(world_from_first.rotation, first_from_second.camera_centre_m);
+    world.camera_centre_m = {world_from_first.camera_centre_m[0] + offset[0],
+                             world_from_first.camera_centre_m[1] + offset[1],
+                             world_from_first.camera_centre_m[2] + offset[2]};
+    return world;
+}
+
 /// The feature of `view` in a match stored with the pair's own orientation.
 int featureOf(const PairMatches& pair, int view, const std::pair<int, int>& match) {
     return pair.view_a == view ? match.first : match.second;
@@ -94,6 +132,38 @@ int featureOf(const PairMatches& pair, int view, const std::pair<int, int>& matc
 /// The feature of the *other* view in the same match.
 int otherFeatureOf(const PairMatches& pair, int view, const std::pair<int, int>& match) {
     return pair.view_a == view ? match.second : match.first;
+}
+
+/// How many of a seed's points a neighbouring view could actually use for PnP. This decides which
+/// seed is worth growing: a seed whose points no neighbour can match will never extend (D037).
+int thirdViewSupport(
+    const Reconstruction& reconstruction,
+    const std::vector<PairMatches>& pairs,
+    const PairMatches& seed) {
+    const std::unordered_map<std::uint64_t, int> index = featureIndex(reconstruction);
+    int best = 0;
+    for (const int seed_view : {seed.view_a, seed.view_b}) {
+        for (const PairMatches& pair : pairs) {
+            int other = -1;
+            if (pair.view_a == seed_view) {
+                other = pair.view_b;
+            } else if (pair.view_b == seed_view) {
+                other = pair.view_a;
+            }
+            if (other < 0) {
+                continue;
+            }
+            int matched = 0;
+            for (const std::pair<int, int>& match : pair.matches) {
+                const int theirs = featureOf(pair, seed_view, match);
+                if (index.find(featureKey(seed_view, theirs)) != index.end()) {
+                    ++matched;
+                }
+            }
+            best = std::max(best, matched);
+        }
+    }
+    return best;
 }
 
 }  // namespace
@@ -148,8 +218,8 @@ ReconstructionReport Session::run() {
         return result_.report;
     }
 
-    // Matching is pairwise and geometric: every pair is validated by an essential matrix before
-    // any of its matches can create a 3D point, so a false match cannot drag a track off geometry.
+    // Matching is pairwise and geometric: a pair is validated by an essential matrix before any of
+    // its matches can create a 3D point, so a false match cannot drag a point off its epipolar line.
     const feature::MatchOptions match_options = neighbourMatchOptions();
     std::vector<PairMatches> pairs;
     for (std::size_t first = 0; first < features_.size(); ++first) {
@@ -192,15 +262,12 @@ ReconstructionReport Session::run() {
         return result_.report;
     }
 
-    Reconstruction& reconstruction = result_.reconstruction;
-    reconstruction.views.resize(features_.size());
+    std::vector<ViewState> base_views(features_.size());
     for (std::size_t index = 0; index < features_.size(); ++index) {
-        reconstruction.views[index].camera = cameras_[index];
-        reconstruction.views[index].feature_count = pixels_[index].size();
+        base_views[index].camera = cameras_[index];
+        base_views[index].feature_count = pixels_[index].size();
     }
 
-    // The seed is the richest pair that initialises; both decompositions fit their own pair, so a
-    // mirrored seed only shows up once a third view fails to register against it.
     std::vector<const PairMatches*> ordered;
     ordered.reserve(pairs.size());
     for (const PairMatches& pair : pairs) {
@@ -211,217 +278,328 @@ ReconstructionReport Session::run() {
                          return a->matches.size() > b->matches.size();
                      });
 
-    bool seeded = false;
-    int attempts = 0;
-    for (const PairMatches* pair : ordered) {
-        if (attempts >= kMaxSeedAttempts) {
-            break;
-        }
-        ++attempts;
-
+    auto seedInto = [this](Reconstruction& reconstruction, const PairMatches& pair) {
         std::vector<geometry::PointCorrespondence> correspondences;
-        correspondences.reserve(pair->matches.size());
-        for (const std::pair<int, int>& match : pair->matches) {
+        correspondences.reserve(pair.matches.size());
+        for (const std::pair<int, int>& match : pair.matches) {
             correspondences.push_back(
-                {pixels_[static_cast<std::size_t>(pair->view_a)]
+                {pixels_[static_cast<std::size_t>(pair.view_a)]
                           [static_cast<std::size_t>(match.first)],
-                 pixels_[static_cast<std::size_t>(pair->view_b)]
+                 pixels_[static_cast<std::size_t>(pair.view_b)]
                           [static_cast<std::size_t>(match.second)]});
         }
-        const TwoViewInitialization initialization =
-            initializeTwoView(correspondences,
-                              cameras_[static_cast<std::size_t>(pair->view_a)],
-                              cameras_[static_cast<std::size_t>(pair->view_b)], options_.two_view);
+        const TwoViewInitialization initialization = initializeTwoView(
+            correspondences, cameras_[static_cast<std::size_t>(pair.view_a)],
+            cameras_[static_cast<std::size_t>(pair.view_b)], options_.two_view);
         if (!initialization.valid) {
-            continue;
+            return false;
         }
 
-        const int view_a = pair->view_a;
-        const int view_b = pair->view_b;
-        reconstruction.views[static_cast<std::size_t>(view_a)].pose = initialization.first;
-        reconstruction.views[static_cast<std::size_t>(view_a)].registered = true;
-        reconstruction.views[static_cast<std::size_t>(view_b)].pose = initialization.second;
-        reconstruction.views[static_cast<std::size_t>(view_b)].registered = true;
-        result_.registration_order = {view_a, view_b};
+        ViewState& first = reconstruction.views[static_cast<std::size_t>(pair.view_a)];
+        first.pose = initialization.first;
+        first.registered = true;
+        ViewState& second = reconstruction.views[static_cast<std::size_t>(pair.view_b)];
+        second.pose = initialization.second;
+        second.registered = true;
 
-        // The seed already triangulated its own points; keeping them avoids a second solve.
         for (std::size_t index = 0; index < initialization.points.size(); ++index) {
             const std::pair<int, int>& match =
-                pair->matches[static_cast<std::size_t>(initialization.source_index[index])];
+                pair.matches[static_cast<std::size_t>(initialization.source_index[index])];
             MapPoint point;
             point.position_m = initialization.points[index];
             point.observations = {
-                {view_a, match.first, pixels_[static_cast<std::size_t>(view_a)]
-                                                 [static_cast<std::size_t>(match.first)]},
-                {view_b, match.second, pixels_[static_cast<std::size_t>(view_b)]
-                                                  [static_cast<std::size_t>(match.second)]},
+                {pair.view_a, match.first,
+                 pixels_[static_cast<std::size_t>(pair.view_a)]
+                        [static_cast<std::size_t>(match.first)]},
+                {pair.view_b, match.second,
+                 pixels_[static_cast<std::size_t>(pair.view_b)]
+                        [static_cast<std::size_t>(match.second)]},
             };
             reconstruction.points.push_back(std::move(point));
         }
-        seeded = true;
-        break;
-    }
-    if (!seeded) {
-        return result_.report;
-    }
+        return true;
+    };
 
-    prune(reconstruction);
-    std::unordered_map<std::uint64_t, int> point_of_feature = featureIndex(reconstruction);
-
-    // Incremental growth: register one view at a time against the nearest registered neighbour and
-    // extend the map only from matches the new pose actually explains. Rebuilding the whole map from
-    // global tracks welds inconsistent matches together, which is why this walks the capture order
-    // instead (D035).
-    int registered = static_cast<int>(result_.registration_order.size());
-    bool progress = true;
-    while (progress) {
-        progress = false;
-        for (int view = 0; view < static_cast<int>(features_.size()); ++view) {
-            if (reconstruction.views[static_cast<std::size_t>(view)].registered) {
-                continue;
-            }
-
-            const PairMatches* pair = nullptr;
-            int reference = -1;
-            std::size_t best_matches = 0;
-            for (int offset = -kMaxViewGap; offset <= kMaxViewGap; ++offset) {
-                if (offset == 0) {
+    // Registers views one at a time against the nearest registered neighbour: PnP when the candidate
+    // sees enough of the map, then the matches that pose actually explains become points.
+    auto grow = [this, &pairs](Reconstruction& reconstruction) {
+        std::unordered_map<std::uint64_t, int> point_of_feature = featureIndex(reconstruction);
+        bool progress = true;
+        while (progress) {
+            progress = false;
+            for (int view = 0; view < static_cast<int>(features_.size()); ++view) {
+                if (reconstruction.views[static_cast<std::size_t>(view)].registered) {
                     continue;
                 }
-                const int other = view + offset;
-                if (other < 0 || other >= static_cast<int>(features_.size()) ||
-                    !reconstruction.views[static_cast<std::size_t>(other)].registered) {
-                    continue;
-                }
-                for (const PairMatches& candidate : pairs) {
-                    const bool matches_views =
-                        (candidate.view_a == view && candidate.view_b == other) ||
-                        (candidate.view_a == other && candidate.view_b == view);
-                    if (matches_views && candidate.matches.size() > best_matches) {
-                        best_matches = candidate.matches.size();
-                        pair = &candidate;
-                        reference = other;
+
+                const PairMatches* pair = nullptr;
+                int reference = -1;
+                std::size_t best_matches = 0;
+                for (int offset = -kMaxViewGap; offset <= kMaxViewGap; ++offset) {
+                    if (offset == 0) {
+                        continue;
+                    }
+                    const int other = view + offset;
+                    if (other < 0 || other >= static_cast<int>(features_.size()) ||
+                        !reconstruction.views[static_cast<std::size_t>(other)].registered) {
+                        continue;
+                    }
+                    for (const PairMatches& candidate : pairs) {
+                        const bool links_views =
+                            (candidate.view_a == view && candidate.view_b == other) ||
+                            (candidate.view_a == other && candidate.view_b == view);
+                        if (links_views && candidate.matches.size() > best_matches) {
+                            best_matches = candidate.matches.size();
+                            pair = &candidate;
+                            reference = other;
+                        }
                     }
                 }
-            }
-            if (pair == nullptr) {
-                continue;
-            }
-
-            std::vector<Vec3> object_points;
-            std::vector<Vec2> image_points;
-            for (const std::pair<int, int>& match : pair->matches) {
-                const int mine = featureOf(*pair, view, match);
-                const int theirs = otherFeatureOf(*pair, view, match);
-                const auto found = point_of_feature.find(featureKey(reference, theirs));
-                if (found == point_of_feature.end()) {
+                if (pair == nullptr) {
                     continue;
                 }
-                object_points.push_back(
-                    reconstruction.points[static_cast<std::size_t>(found->second)].position_m);
-                image_points.push_back(
-                    pixels_[static_cast<std::size_t>(view)][static_cast<std::size_t>(mine)]);
-            }
-            if (object_points.size() < 6) {
-                continue;
-            }
 
-            const PnpResult pnp =
-                estimatePoseRansac(object_points, image_points,
-                                   cameras_[static_cast<std::size_t>(view)], options_.pnp);
-            const double required =
-                std::max(6.0, options_.min_pnp_inlier_ratio *
-                                  static_cast<double>(object_points.size()));
-            if (!pnp.valid || static_cast<double>(pnp.inliers) < required) {
-                continue;
-            }
+                const ViewState& reference_view =
+                    reconstruction.views[static_cast<std::size_t>(reference)];
 
-            // Rotation and baseline windows keep near-duplicate frames out of the map.
-            const ViewState& reference_view = reconstruction.views[static_cast<std::size_t>(reference)];
-            const KeyframeDecision decision = evaluateKeyframe(
-                rotationAngleRad(reference_view.pose.rotation, pnp.pose.rotation),
-                baselineM(reference_view.pose, pnp.pose), 1.0, options_.keyframe);
-            if (!decision.accept) {
-                continue;
-            }
+                std::vector<Vec3> object_points;
+                std::vector<Vec2> image_points;
+                for (const std::pair<int, int>& match : pair->matches) {
+                    const int mine = featureOf(*pair, view, match);
+                    const int theirs = otherFeatureOf(*pair, view, match);
+                    const auto found = point_of_feature.find(featureKey(reference, theirs));
+                    if (found == point_of_feature.end()) {
+                        continue;
+                    }
+                    object_points.push_back(
+                        reconstruction.points[static_cast<std::size_t>(found->second)].position_m);
+                    image_points.push_back(
+                        pixels_[static_cast<std::size_t>(view)][static_cast<std::size_t>(mine)]);
+                }
 
-            ViewState& state = reconstruction.views[static_cast<std::size_t>(view)];
-            state.pose = pnp.pose;
-            state.registered = true;
-            result_.registration_order.push_back(view);
-            ++registered;
-            progress = true;
+                Pose candidate_pose;
+                bool have_pose = false;
+                if (object_points.size() >= static_cast<std::size_t>(kMinPnpCorrespondences)) {
+                    const PnpResult pnp = estimatePoseRansac(
+                        object_points, image_points, cameras_[static_cast<std::size_t>(view)],
+                        options_.pnp);
+                    const double required =
+                        std::max(6.0, options_.min_pnp_inlier_ratio *
+                                          static_cast<double>(object_points.size()));
+                    if (pnp.valid && static_cast<double>(pnp.inliers) >= required) {
+                        candidate_pose = pnp.pose;
+                        have_pose = true;
+                    }
+                }
 
-            // Attach this view to points it already sees, then create the points only it and the
-            // reference can triangulate.
-            const double limit = kOutlierReprojectionPx * kOutlierReprojectionPx;
-            for (const std::pair<int, int>& match : pair->matches) {
-                const int mine = featureOf(*pair, view, match);
-                const int theirs = otherFeatureOf(*pair, view, match);
-                const auto found = point_of_feature.find(featureKey(reference, theirs));
-                if (found == point_of_feature.end()) {
+                // A two-view map is far too thin for PnP. Capture is sequential, so the pair's own
+                // relative pose, scaled by the depths of the map points the pair also sees, places
+                // the view well enough to triangulate against; later views then see a real map
+                // (D037).
+                if (!have_pose) {
+                    std::vector<geometry::PointCorrespondence> correspondences;
+                    correspondences.reserve(pair->matches.size());
+                    for (const std::pair<int, int>& match : pair->matches) {
+                        correspondences.push_back(
+                            {pixels_[static_cast<std::size_t>(reference)]
+                                    [static_cast<std::size_t>(otherFeatureOf(*pair, view, match))],
+                             pixels_[static_cast<std::size_t>(view)]
+                                    [static_cast<std::size_t>(featureOf(*pair, view, match))]});
+                    }
+                    const TwoViewInitialization relative = initializeTwoView(
+                        correspondences, cameras_[static_cast<std::size_t>(reference)],
+                        cameras_[static_cast<std::size_t>(view)], options_.two_view);
+                    if (!relative.valid || relative.inliers < 8) {
+                        continue;
+                    }
+
+                    std::vector<double> scales;
+                    for (std::size_t index = 0; index < relative.points.size(); ++index) {
+                        const std::pair<int, int>& match =
+                            pair->matches[static_cast<std::size_t>(relative.source_index[index])];
+                        const auto found = point_of_feature.find(
+                            featureKey(reference, otherFeatureOf(*pair, view, match)));
+                        if (found == point_of_feature.end()) {
+                            continue;
+                        }
+                        const Vec3 camera_point = worldToCamera(
+                            reference_view.pose,
+                            reconstruction.points[static_cast<std::size_t>(found->second)]
+                                .position_m);
+                        const double relative_depth = relative.points[index][2];
+                        if (camera_point[2] > 1e-9 && relative_depth > 1e-9) {
+                            scales.push_back(camera_point[2] / relative_depth);
+                        }
+                    }
+                    if (scales.empty()) {
+                        continue;
+                    }
+                    std::sort(scales.begin(), scales.end());
+                    const double scale = scales[scales.size() / 2];
+                    if (!(scale > 0.0) || !std::isfinite(scale)) {
+                        continue;
+                    }
+
+                    Pose relative_pose = relative.second;
+                    relative_pose.camera_centre_m = {relative_pose.camera_centre_m[0] * scale,
+                                                     relative_pose.camera_centre_m[1] * scale,
+                                                     relative_pose.camera_centre_m[2] * scale};
+                    candidate_pose = composePose(reference_view.pose, relative_pose);
+                    have_pose = true;
+                }
+
+                // Rotation and baseline windows keep near-duplicate frames out of the map.
+                const KeyframeDecision decision = evaluateKeyframe(
+                    rotationAngleRad(reference_view.pose.rotation, candidate_pose.rotation),
+                    baselineM(reference_view.pose, candidate_pose), 1.0, options_.keyframe);
+                if (!decision.accept) {
                     continue;
                 }
-                MapPoint& point =
-                    reconstruction.points[static_cast<std::size_t>(found->second)];
-                const Vec2 pixel =
-                    pixels_[static_cast<std::size_t>(view)][static_cast<std::size_t>(mine)];
-                if (squaredReprojectionPx(state.camera, state.pose, point.position_m, pixel) <=
-                    limit) {
-                    point.observations.push_back({view, mine, pixel});
-                }
-            }
 
-            for (const std::pair<int, int>& match : pair->matches) {
-                const int mine = featureOf(*pair, view, match);
-                const int theirs = otherFeatureOf(*pair, view, match);
-                if (point_of_feature.count(featureKey(view, mine)) != 0 ||
-                    point_of_feature.count(featureKey(reference, theirs)) != 0) {
-                    continue;
-                }
-                TriangulationResult triangulated;
-                if (!triangulateTwoView(
-                        reference_view.camera, reference_view.pose,
-                        pixels_[static_cast<std::size_t>(reference)]
-                              [static_cast<std::size_t>(theirs)],
-                        state.camera, state.pose,
-                        pixels_[static_cast<std::size_t>(view)][static_cast<std::size_t>(mine)],
-                        triangulated, kMinParallaxRad)) {
-                    continue;
-                }
-                const int index = static_cast<int>(reconstruction.points.size());
-                MapPoint point;
-                point.position_m = triangulated.position_m;
-                point.observations = {
-                    {reference, theirs,
-                     pixels_[static_cast<std::size_t>(reference)]
-                           [static_cast<std::size_t>(theirs)]},
-                    {view, mine,
-                     pixels_[static_cast<std::size_t>(view)][static_cast<std::size_t>(mine)]},
-                };
-                point_of_feature[featureKey(reference, theirs)] = index;
-                point_of_feature[featureKey(view, mine)] = index;
-                reconstruction.points.push_back(std::move(point));
-            }
+                ViewState& state = reconstruction.views[static_cast<std::size_t>(view)];
+                state.pose = candidate_pose;
+                state.registered = true;
+                progress = true;
 
-            prune(reconstruction);
-            point_of_feature = featureIndex(reconstruction);
+                // Attach this view to points it already sees, then create the points only it and the
+                // reference can triangulate.
+                const double limit = kOutlierReprojectionPx * kOutlierReprojectionPx;
+                for (const std::pair<int, int>& match : pair->matches) {
+                    const int mine = featureOf(*pair, view, match);
+                    const int theirs = otherFeatureOf(*pair, view, match);
+                    const auto found = point_of_feature.find(featureKey(reference, theirs));
+                    if (found == point_of_feature.end()) {
+                        continue;
+                    }
+                    MapPoint& point =
+                        reconstruction.points[static_cast<std::size_t>(found->second)];
+                    const Vec2 pixel =
+                        pixels_[static_cast<std::size_t>(view)][static_cast<std::size_t>(mine)];
+                    if (squaredReprojectionPx(state.camera, state.pose, point.position_m, pixel) <=
+                        limit) {
+                        point.observations.push_back({view, mine, pixel});
+                    }
+                }
 
-            if (options_.bundle_adjust_every > 0 &&
-                registered % options_.bundle_adjust_every == 0) {
-                optimize(reconstruction, options_.bundle_adjustment);
+                for (const std::pair<int, int>& match : pair->matches) {
+                    const int mine = featureOf(*pair, view, match);
+                    const int theirs = otherFeatureOf(*pair, view, match);
+                    if (point_of_feature.count(featureKey(view, mine)) != 0 ||
+                        point_of_feature.count(featureKey(reference, theirs)) != 0) {
+                        continue;
+                    }
+                    TriangulationResult triangulated;
+                    if (!triangulateTwoView(
+                            reference_view.camera, reference_view.pose,
+                            pixels_[static_cast<std::size_t>(reference)]
+                                  [static_cast<std::size_t>(theirs)],
+                            state.camera, state.pose,
+                            pixels_[static_cast<std::size_t>(view)]
+                                  [static_cast<std::size_t>(mine)],
+                            triangulated, kMinParallaxRad)) {
+                        continue;
+                    }
+                    const int index = static_cast<int>(reconstruction.points.size());
+                    MapPoint point;
+                    point.position_m = triangulated.position_m;
+                    point.observations = {
+                        {reference, theirs,
+                         pixels_[static_cast<std::size_t>(reference)]
+                               [static_cast<std::size_t>(theirs)]},
+                        {view, mine,
+                         pixels_[static_cast<std::size_t>(view)][static_cast<std::size_t>(mine)]},
+                    };
+                    point_of_feature[featureKey(reference, theirs)] = index;
+                    point_of_feature[featureKey(view, mine)] = index;
+                    reconstruction.points.push_back(std::move(point));
+                }
+
                 prune(reconstruction);
                 point_of_feature = featureIndex(reconstruction);
             }
         }
+    };
+
+    struct SeedAttempt {
+        const PairMatches* pair = nullptr;
+        Reconstruction reconstruction;
+        int support = 0;
+        int points = 0;
+    };
+
+    std::vector<SeedAttempt> seeds;
+    for (const PairMatches* pair : ordered) {
+        if (static_cast<int>(seeds.size()) >= kMaxSeedAttempts) {
+            break;
+        }
+        SeedAttempt attempt;
+        attempt.pair = pair;
+        attempt.reconstruction.views = base_views;
+        if (!seedInto(attempt.reconstruction, *pair)) {
+            continue;
+        }
+        prune(attempt.reconstruction);
+        attempt.points = validPointCount(attempt.reconstruction);
+        if (attempt.points == 0) {
+            continue;
+        }
+        attempt.support = thirdViewSupport(attempt.reconstruction, pairs, *pair);
+        seeds.push_back(std::move(attempt));
+    }
+    if (seeds.empty()) {
+        return result_.report;
     }
 
-    if (registered >= 3) {
-        optimize(reconstruction, options_.bundle_adjustment);
-        prune(reconstruction);
+    // A pair alone cannot tell a mirror from the truth, and the mirrored seed keeps only a sliver of
+    // its inliers, which no neighbour can match. Scoring by third-view support picks the branches
+    // that can actually grow; only the best few are grown because that is the expensive step
+    // (D029, D037).
+    std::stable_sort(seeds.begin(), seeds.end(), [](const SeedAttempt& a, const SeedAttempt& b) {
+        if (a.support != b.support) {
+            return a.support > b.support;
+        }
+        return a.points > b.points;
+    });
+
+    SfmResult best;
+    int best_registered = -1;
+    int best_points = -1;
+    int grown = 0;
+    for (SeedAttempt& seed : seeds) {
+        if (grown > 0 && seed.support < kMinPnpCorrespondences) {
+            continue;
+        }
+        ++grown;
+
+        SfmResult attempt;
+        attempt.reconstruction = std::move(seed.reconstruction);
+        attempt.registration_order = {seed.pair->view_a, seed.pair->view_b};
+
+        grow(attempt.reconstruction);
+
+        const int registered_views = registeredCount(attempt.reconstruction);
+        // Bundle adjustment only runs once a third view agrees: with two views it can trade the
+        // reconstruction for a mirrored one that fits the same pixels (D029).
+        if (registered_views >= 3 && validPointCount(attempt.reconstruction) > 0) {
+            optimize(attempt.reconstruction, options_.bundle_adjustment);
+            prune(attempt.reconstruction);
+        }
+        attempt.report = summarize(attempt.reconstruction);
+
+        if (attempt.report.views_registered > best_registered ||
+            (attempt.report.views_registered == best_registered &&
+             attempt.report.points > best_points)) {
+            best_registered = attempt.report.views_registered;
+            best_points = attempt.report.points;
+            best = attempt;
+        }
+        if (registered_views >= 3 || grown >= kMaxGrowAttempts) {
+            break;
+        }
     }
-    result_.report = summarize(reconstruction);
-    ran_ = registered >= 2;
+
+    result_ = std::move(best);
+    ran_ = result_.report.views_registered >= 2;
     return result_.report;
 }
 
@@ -511,17 +689,8 @@ bool Session::trackPose(
         return false;
     }
 
-    std::unordered_map<std::uint64_t, int> point_of_feature;
-    for (std::size_t index = 0; index < result_.reconstruction.points.size(); ++index) {
-        const MapPoint& point = result_.reconstruction.points[index];
-        if (!point.valid) {
-            continue;
-        }
-        for (const Observation& observation : point.observations) {
-            point_of_feature[featureKey(observation.view, observation.feature)] =
-                static_cast<int>(index);
-        }
-    }
+    const std::unordered_map<std::uint64_t, int> point_of_feature =
+        featureIndex(result_.reconstruction);
 
     feature::MatchOptions match_options;
     match_options.ratio_percent = 85;
@@ -546,7 +715,7 @@ bool Session::trackPose(
              live.keypoints[static_cast<std::size_t>(match.query_index)].y_px});
     }
 
-    if (object_points.size() < 6) {
+    if (object_points.size() < static_cast<std::size_t>(kMinPnpCorrespondences)) {
         return false;
     }
 
