@@ -193,9 +193,17 @@ private fun CameraScreen(
         if (state.overlayEnabled) {
             OpacitySlider(state = state, onOverlayOpacityChange = onOverlayOpacityChange)
         }
-        ExposureSlider(state = state, onExposureChange = onExposureChange)
-        FocusSlider(state = state, onFocusChange = onFocusChange)
-        KeyframeCloudsRow(state = state, onKeyframeCloudsChange = onKeyframeCloudsChange)
+        // Collapsed by default: three more rows shrank the preview, which is the part of the
+        // screen the scan is actually aimed with (D059).
+        val manualOpen = androidx.compose.runtime.remember {
+            androidx.compose.runtime.mutableStateOf(false)
+        }
+        ManualHeader(open = manualOpen.value, onToggle = { manualOpen.value = !manualOpen.value })
+        if (manualOpen.value) {
+            ExposureSlider(state = state, onExposureChange = onExposureChange)
+            FocusSlider(state = state, onFocusChange = onFocusChange)
+            KeyframeCloudsRow(state = state, onKeyframeCloudsChange = onKeyframeCloudsChange)
+        }
         Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(DIVIDER_COLOR))
         CaptureControls(
             state = state,
@@ -481,6 +489,26 @@ private fun SliderRow(
                 inactiveTrackColor = Color(0x33FFFFFF),
             ),
         )
+    }
+}
+
+/** Opens the manual controls; collapsed, the camera screen is the layout it had before (D059). */
+@Composable
+private fun ManualHeader(open: Boolean, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 2.dp)
+            .clickable(role = Role.Switch, onClick = onToggle),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.capture_manual_label),
+            color = if (open) Color.White else SECONDARY_TEXT,
+            fontSize = 12.sp,
+        )
+        androidx.compose.material3.Switch(checked = open, onCheckedChange = { onToggle() })
     }
 }
 

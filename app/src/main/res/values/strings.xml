@@ -27,6 +27,7 @@
     <string name="capture_gallery_description">Newest saved frame</string>
     <string name="capture_flip_label">Flip camera</string>
     <string name="overlay_opacity_label">Overlay opacity</string>
+    <string name="capture_manual_label">Manual controls</string>
     <string name="capture_exposure_label">Exposure</string>
     <string name="capture_exposure_value">%1$d ms</string>
     <string name="capture_focus_label">Focus</string>

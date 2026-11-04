@@ -207,14 +207,46 @@ class CameraCaptureController(
 
     fun lockedSettings(): LockedCaptureSettings? = lockedSettings
 
-    /** Manual exposure for the stills; 0 keeps the locked value (D059). */
+    /** Manual exposure; 0 keeps the locked value (D059). Applies to the preview at once. */
     fun setManualExposure(ns: Long) {
-        handler?.post { manualExposureNs = if (ns > 0L) ns else 0L }
+        handler?.post {
+            manualExposureNs = if (ns > 0L) ns else 0L
+            reapplyPreview()
+        }
     }
 
-    /** Manual focus in dioptres for the stills; negative keeps the locked value (D059). */
+    /** Manual focus in dioptres; negative keeps the locked value (D059). */
     fun setManualFocus(diopter: Float) {
-        handler?.post { manualFocusDiopter = if (diopter >= 0f) diopter else -1f }
+        handler?.post {
+            manualFocusDiopter = if (diopter >= 0f) diopter else -1f
+            reapplyPreview()
+        }
+    }
+
+    /**
+     * Pushes a slider value into the running preview, which is what the user is looking at. Before
+     * the first lock the preview is still auto, so there is nothing to override; afterwards the
+     * repeating request is rebuilt from the locked settings plus whatever the sliders set (D059).
+     * Without this the sliders only reached the stills and appeared to do nothing.
+     */
+    private fun reapplyPreview() {
+        val cameraHandler = handler ?: return
+        // Coalesce a drag: re-issuing the repeating request on every tick starves the camera, which
+        // is exactly the sort of thing that makes a preview stutter.
+        cameraHandler.removeCallbacks(previewApply)
+        cameraHandler.postDelayed(previewApply, PREVIEW_APPLY_DELAY_MS)
+    }
+
+    private val previewApply = Runnable {
+        val session = captureSession ?: return@Runnable
+        if (lockedSettings == null) {
+            return@Runnable
+        }
+        applyLockedSettings(session)
+        Log.i(
+            LOG_TAG,
+            "manual preview: exposure=${manualExposureNs}ns focus=${manualFocusDiopter}diopter",
+        )
     }
 
     @SuppressLint("MissingPermission")
@@ -595,7 +627,7 @@ class CameraCaptureController(
         // analysis stream has to be a target of every repeating preview request (D051).
         analysisReader?.let { request.addTarget(it.surface) }
         fpsRange?.let { request.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
-        applySettings(request, settings)
+        applySettings(request, settings, for_preview = true)
         runCatching { session.setRepeatingRequest(request.build(), previewCallback, handler) }
             .onFailure { Log.e(LOG_TAG, "locked repeating request failed", it) }
     }
@@ -636,7 +668,11 @@ class CameraCaptureController(
         }
     }
 
-    private fun applySettings(request: CaptureRequest.Builder, settings: LockedCaptureSettings) {
+    private fun applySettings(
+        request: CaptureRequest.Builder,
+        settings: LockedCaptureSettings,
+        for_preview: Boolean = false,
+    ) {
         request.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_OFF)
         request.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
         request.set(CaptureRequest.SENSOR_EXPOSURE_TIME, settings.exposure_ns)
@@ -656,7 +692,11 @@ class CameraCaptureController(
         // A slider only overrides the value it was moved for; exposure, gain, white balance and the
         // other axis stay locked, so a scan keeps one photometric setting (D059).
         if (manualExposureNs > 0L) {
-            request.set(CaptureRequest.SENSOR_EXPOSURE_TIME, manualExposureNs)
+            // The preview has to stay inside a 30 fps frame or it stops moving; a still may expose
+            // for the full manual value (D052, D059).
+            val exposure =
+                if (for_preview) minOf(manualExposureNs, PREVIEW_FRAME_NS) else manualExposureNs
+            request.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposure)
         }
         if (manualFocusDiopter >= 0f) {
             request.set(CaptureRequest.LENS_FOCUS_DISTANCE, manualFocusDiopter)
@@ -667,6 +707,12 @@ class CameraCaptureController(
 
     /** Longest a still may expose; beyond this the phone's frame timing falls apart (D052). */
     private val MAX_STILL_EXPOSURE_NS = 100_000_000L
+
+    /** One 30 fps frame, the longest the preview may expose and still keep moving. */
+    private val PREVIEW_FRAME_NS = 33_000_000L
+
+    /** A slider drag delivers values faster than the camera accepts a new repeating request. */
+    private val PREVIEW_APPLY_DELAY_MS = 80L
 
     private fun captureStill() {
         val session = captureSession ?: return
