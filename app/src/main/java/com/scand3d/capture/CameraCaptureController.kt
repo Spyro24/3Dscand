@@ -33,6 +33,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -318,6 +319,21 @@ class CameraCaptureController(
         handler?.post {
             capturing.set(false)
             flushManifest(shutdownWriter = false)
+        }
+    }
+
+    /**
+     * Hands work to the frame writer, or runs it inline once that writer is gone. `release()` and a
+     * camera loss shut the pool down, and a still that was already in flight arrives after that;
+     * submitting it threw RejectedExecutionException on the camera thread and took the app down
+     * with it (measured on the SM-G930F, D055).
+     */
+    private fun submitWrite(block: () -> Unit) {
+        try {
+            fileWriter.execute(block)
+        } catch (rejected: RejectedExecutionException) {
+            Log.w(LOG_TAG, "frame writer closed, writing inline", rejected)
+            runCatching(block)
         }
     }
 
@@ -693,7 +709,7 @@ class CameraCaptureController(
 
         // Deciding, downscaling and writing run off the camera thread: done inline they dropped the
         // preview to a few frames per second while a burst was running.
-        fileWriter.execute { persistStill(bytes, metadata, timestamp) }
+        submitWrite { persistStill(bytes, metadata, timestamp) }
     }
 
     /**
