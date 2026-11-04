@@ -22,12 +22,27 @@ FetchContent_Declare(googletest
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-add_executable(bridge_api_test
-    native/bridge_api_test.cpp
+# Everything the host tests link against: the core sources under test and the synthetic scene
+# utility. Each test executable is a thin wrapper over this library.
+add_library(scand3d_test_util STATIC
     "${SCAND3D_CORE_DIR}/bridge/bridge_api.cpp"
+    synthetic/synthetic_scene.cpp
 )
-target_include_directories(bridge_api_test PRIVATE "${SCAND3D_CORE_DIR}")
-target_link_libraries(bridge_api_test PRIVATE GTest::gtest_main)
+target_include_directories(scand3d_test_util PUBLIC
+    "${SCAND3D_CORE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
 
 include(GoogleTest)
+
+add_executable(bridge_api_test
+    native/bridge_api_test.cpp
+)
+target_link_libraries(bridge_api_test PRIVATE scand3d_test_util GTest::gtest_main)
 gtest_discover_tests(bridge_api_test)
+
+add_executable(synthetic_scene_test
+    native/synthetic_scene_test.cpp
+)
+target_link_libraries(synthetic_scene_test PRIVATE scand3d_test_util GTest::gtest_main)
+gtest_discover_tests(synthetic_scene_test)

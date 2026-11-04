@@ -91,3 +91,15 @@ here with its version, license and reason (agents.md sections 2 and 7).
   `extern "C"` entry points in `core/bridge/jni_bridge.cpp`.
 - **Consequence:** Every future native call is added there and reaches C++ through the interface
   header `core/bridge/bridge_api.hpp`, so nothing else in Kotlin talks to JNI directly.
+
+### D012 - Synthetic scenes live in `tests/synthetic/`, camera axes follow OpenCV
+- **Reason:** Roadmap 0.5 asks for a known mesh with simulated cameras as a test utility, and
+  Phases 3, 4, 6 and 8 all need ground truth to measure against. The utility is test-only, so it
+  stays out of `core/` and never enters the APK, but it is compiled into the shared host test
+  library (`scand3d_test_util`) so any later test can use it.
+- **Camera axes:** +X right, +Y down, +Z forward (OpenCV), `+Y` therefore increases down the
+  image. `agents.md` fixes the pose convention (camera-to-world, float64, meters) but not the
+  axis orientation, so it is pinned here before any geometry code depends on it.
+- **Consequence:** The turntable object is two stacked, offset boxes with two albedo values - no
+  symmetry, so a pose estimate cannot be ambiguous. Rendering is z-buffered with back-face
+  rejection and Lambert shading, and is fully deterministic for pixel-exact assertions.
