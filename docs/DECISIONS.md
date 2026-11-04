@@ -56,3 +56,11 @@ here with its version, license and reason (agents.md sections 2 and 7).
 - `docs/architecture.md` (roadmap 0.7) - not written yet.
 - Feature detector, meshing strategy and segmentation model (agents.md section 7) - still open,
   decided in Phases 3, 7 and 8.
+
+### D008 - NDK 26.1.10909125 (r26b) and CMake 3.22.1
+- **License:** NDK (Apache-2.0 with LLVM exceptions), CMake (BSD-3-Clause).
+- **Reason:** 26.1.10909125 is the NDK version AGP 8.5.2 defaults to, and 3.22.1 is the CMake
+  version packaged with it, so the native build needs no extra configuration. C++17 per
+  agents.md section 2, `-DANDROID_STL=c++_static` so the APK carries one shared library.
+- **Consequence:** Both live in the project-local SDK (D003). Native sources are compiled by
+  CMake into a single `libscand3d_core.so`; the app loads it from `Scand3dApplication`.

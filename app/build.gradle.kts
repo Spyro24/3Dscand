@@ -7,6 +7,7 @@ plugins {
 android {
     namespace = "com.scand3d"
     compileSdk = 34
+    ndkVersion = "26.1.10909125"
 
     defaultConfig {
         applicationId = "com.scand3d"
@@ -18,6 +19,20 @@ android {
         // Only arm64-v8a ships; see agents.md section 2.
         ndk {
             abiFilters += "arm64-v8a"
+        }
+
+        externalNativeBuild {
+            cmake {
+                // Static libc++ keeps the APK to one shared library per ABI.
+                arguments += "-DANDROID_STL=c++_static"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("../core/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 

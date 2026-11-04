@@ -10,7 +10,7 @@ Legend: `[ ]` open, `[x]` done, `[~]` in progress, `[s]` stub (marked `// STUB` 
 Goal: an empty app that builds, runs native code and runs tests.
 
 - [x] 0.1 Gradle project with Kotlin, Compose and minimum SDK 29
-- [ ] 0.2 CMake/NDK setup for arm64-v8a, native library loads at app start
+- [x] 0.2 CMake/NDK setup for arm64-v8a, native library loads at app start
 - [ ] 0.3 JNI bridge skeleton in `core/bridge/`
 - [ ] 0.4 Test harness: gtest for C++, JUnit for Kotlin, both run in CI
 - [ ] 0.5 Synthetic scene generator (known mesh, simulated cameras) as a test utility
