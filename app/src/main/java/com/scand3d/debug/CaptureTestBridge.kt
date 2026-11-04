@@ -16,6 +16,9 @@ object CaptureTestBridge {
 
         /** Shows or clears the canned overlay cloud used to verify the Phase 5 render path. */
         fun setOverlayDemo(enabled: Boolean)
+
+        /** Reconstructs the newest saved session and loads it into the overlay. */
+        fun reconstructLatestSession()
     }
 
     @Volatile

@@ -413,3 +413,36 @@ here with its version, license and reason (agents.md sections 2 and 7).
   object.
 - **Consequence:** Phase 5 cannot be called accepted until a real cloud exists and 5.5 has a
   number. The next useful piece of work is that wiring, not more overlay code.
+
+### D035 - The app reconstructs through an incremental session, not the global-track pipeline
+- **Decision:** `sfm::Session` (`core/sfm/session.{hpp,cpp}`) owns capture-to-map: it matches
+  neighbouring views only (gap at most two), gates every pair through `estimateEssentialRansac`,
+  seeds from the richest pair `initializeTwoView` accepts, then registers one view at a time by PnP
+  against the map and triangulates only the matches the new pose explains. It does not call
+  `sfm::reconstruct`.
+- **Reason:** on rendered feature matches the global-track path welded correspondences from
+  different pairs into single tracks. Twenty-four rendered views of the textured box reconstructed
+  2 views and 1 point across every scene setting tried, while the same seed pair triangulated to
+  0.5 px mean reprojection. The Phase 4 pipeline was validated on exact lattice tracks, so it is
+  left unchanged.
+- **Consequence:** the session reports its seed pair at 0.5 px mean reprojection on the 24-view
+  turntable, but registers no third view: neighbouring rendered pairs give too few geometrically
+  consistent matches (32 and 227 inliers across the same ring). Multi-view growth and the 90 percent
+  real-scan number stay open, so 5.2's tracking half remains `[~]`. The seed map covers a mostly
+  planar box face, so a tracked pose is fixed only up to the planar flip; the tests assert that
+  tracking returns a pose and refuses a featureless frame, not a rotation bound.
+
+### D036 - The app reconstructs from saved keyframes decoded at 480 px
+- **Decision:** `ReconstructionRunner` decodes up to 12 evenly spaced keyframes of the newest
+  session, converts them to 8-bit gray with the 0.299/0.587/0.114 weights the preview shader uses,
+  and passes the overlay camera's intrinsics scaled to the decoded size
+  (`OverlayCameraParams.scaledTo`). The resulting points replace the demo cloud in the overlay scene
+  and keep the keyframe colour sampling. It runs on its own thread from
+  `CaptureViewModel.reconstructLatestSession`, requested with `adb shell am broadcast -a
+  com.scand3d.debug.CAPTURE --es cmd reconstruct`.
+- **Reason:** even spacing keeps the baseline spread of a short capture, decoding below preview
+  resolution keeps the native side to a few hundred milliseconds per frame, and scaling the
+  intrinsics is the only correct way to reuse one calibration at another resolution.
+- **Consequence:** reconstruction is a debug-triggered action, not a review screen: it handles the
+  newest session only and reports nothing when fewer than two frames are usable. The overlay still
+  publishes on the IMU pose (D032) until a tracked pose is wired into the display pose.

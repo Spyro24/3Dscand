@@ -71,6 +71,76 @@ object NativeCore {
                 max_baseline_rad,
             )
 
+    /** Opens a reconstruction session; 0 when the native core is unavailable. */
+    fun reconstructionCreate(): Long = if (isLoaded) nativeReconstructionCreate() else 0L
+
+    fun reconstructionDestroy(handle: Long) {
+        if (isLoaded && handle != 0L) nativeReconstructionDestroy(handle)
+    }
+
+    /** Adds one 8-bit gray view; returns its index, or -1. */
+    fun reconstructionAddView(
+        handle: Long,
+        gray: ByteArray,
+        width_px: Int,
+        height_px: Int,
+        focal_px: Double,
+        cx_px: Double,
+        cy_px: Double,
+    ): Int =
+        if (isLoaded && handle != 0L && width_px > 0 && height_px > 0 &&
+            gray.size == width_px * height_px
+        ) {
+            nativeReconstructionAddView(handle, gray, width_px, height_px, focal_px, cx_px, cy_px)
+        } else {
+            -1
+        }
+
+    /** Runs the reconstruction; returns the number of registered views. */
+    fun reconstructionRun(handle: Long): Int =
+        if (isLoaded && handle != 0L) nativeReconstructionRun(handle) else 0
+
+    fun reconstructionPointCount(handle: Long): Int =
+        if (isLoaded && handle != 0L) nativeReconstructionPointCount(handle) else 0
+
+    /** Fills `out_positions` with xyz triples; returns how many points were written. */
+    fun reconstructionCopyPoints(handle: Long, out_positions: DoubleArray): Int =
+        if (isLoaded && handle != 0L && out_positions.size >= 3) {
+            nativeReconstructionCopyPoints(handle, out_positions)
+        } else {
+            0
+        }
+
+    /** Tracks a gray frame against the map; returns inliers, 0 when it did not register. */
+    fun reconstructionTrackPose(
+        handle: Long,
+        gray: ByteArray,
+        width_px: Int,
+        height_px: Int,
+        focal_px: Double,
+        cx_px: Double,
+        cy_px: Double,
+        out_rotation: DoubleArray,
+        out_centre_m: DoubleArray,
+    ): Int =
+        if (isLoaded && handle != 0L && width_px > 0 && height_px > 0 &&
+            gray.size == width_px * height_px && out_rotation.size == 9 && out_centre_m.size == 3
+        ) {
+            nativeReconstructionTrackPose(
+                handle,
+                gray,
+                width_px,
+                height_px,
+                focal_px,
+                cx_px,
+                cy_px,
+                out_rotation,
+                out_centre_m,
+            )
+        } else {
+            0
+        }
+
     /** Floats per overlay vertex: {x_ndc, y_ndc, r, g, b}; mirrors kOverlayVertexValueCount. */
     const val OVERLAY_VERTEX_VALUE_COUNT = 5
 
@@ -172,6 +242,41 @@ object NativeCore {
         min_baseline_rad: Double,
         max_baseline_rad: Double,
     ): Boolean
+
+    private external fun nativeReconstructionCreate(): Long
+
+    private external fun nativeReconstructionDestroy(handle: Long)
+
+    private external fun nativeReconstructionAddView(
+        handle: Long,
+        gray: ByteArray,
+        width_px: Int,
+        height_px: Int,
+        focal_px: Double,
+        cx_px: Double,
+        cy_px: Double,
+    ): Int
+
+    private external fun nativeReconstructionRun(handle: Long): Int
+
+    private external fun nativeReconstructionPointCount(handle: Long): Int
+
+    private external fun nativeReconstructionCopyPoints(
+        handle: Long,
+        out_positions: DoubleArray,
+    ): Int
+
+    private external fun nativeReconstructionTrackPose(
+        handle: Long,
+        gray: ByteArray,
+        width_px: Int,
+        height_px: Int,
+        focal_px: Double,
+        cx_px: Double,
+        cy_px: Double,
+        out_rotation: DoubleArray,
+        out_centre_m: DoubleArray,
+    ): Int
 
     private external fun nativeOverlayCreate(): Long
 

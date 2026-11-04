@@ -193,6 +193,29 @@ logs once a second the anchored-to-live pose angle and the cloud's projected cen
 app has no capture-to-reconstruction path yet (D030), the scene is still a debug-only canned cloud,
 marked `// STUB`, so no frame of reference exists to compare against a real object.
 
+## Capture to reconstruction (app wiring)
+
+```
+session keyframe JPEGs
+  └─ ReconstructionRunner: decode to 480 px gray, scale the overlay intrinsics to that size
+       └─ NativeCore.reconstruction* -> bridge -> sfm::Session
+            ├─ features, essential-gated neighbour matches, richest seed pair
+            ├─ incremental registration: PnP against the map, keyframe gate, new points triangulated
+            └─ copyPoints / copyCamera / TrackPose -> overlay scene + KeyframeColorSampler
+```
+
+`sfm::Session` composes `core/feature`, `core/geometry` and `core/sfm` rather than duplicating them:
+neighbouring views are matched, each pair is gated by an essential matrix so a false match cannot
+taint a point, the richest seed pair starts the map, and further views register one at a time by
+PnP against it. Building the map from global tracks welded inconsistent matches together, which is
+why the session grows view by view (D035). The bridge and JNI mirror the same contract, and the
+runner keeps the core gray by decoding and colour-sampling in the app (D033, D036).
+
+The measured part of this path is the seed pair: on the rendered turntable it reconstructs at 0.5 px
+mean reprojection. Growth registers no third view on that fixture because the synthetic speckle
+gives too few consistent matches between neighbours, so the overlay still draws the debug cloud and
+this stays `[~]` (D035).
+
 ## Current phase status
 
 - Phase 0 complete: project, native bridge, local test harnesses, synthetic scenes, benchmarks,
@@ -223,6 +246,8 @@ marked `// STUB`, so no frame of reference exists to compare against a real obje
   still missing (D030, `docs/benchmarks/phase4-sfm-verification.md`).
 - Phase 5 in progress: the overlay renders, follows the fused IMU pose with real camera
   intrinsics, samples point colours from keyframes and has its toggle and opacity control, all
-  covered by host tests and (for 5.1) confirmed drawing on the SM-G930F. 5.5 is open and the whole
-  phase stays unaccepted because the app still has no reconstruction to draw (D031-D034).
+  covered by host tests and (for 5.1) confirmed drawing on the SM-G930F. The app can now reconstruct
+a saved session through `sfm::Session` and load it into the overlay, but only the seed pair
+  reconstructs reliably on synthetic data, so the overlay's default content is still the debug cloud. 5.5 is open and the whole
+  phase stays unaccepted until a real cloud exists (D031-D036).
 - Phases 6 and later are unimplemented; `roadmap.md` is the source of truth.

@@ -44,8 +44,57 @@ bool keyframeBaselineAccept(
     double min_baseline_rad,
     double max_baseline_rad);
 
+/// Opaque handle to one reconstruction session: captured gray views in, sparse map out.
+using ReconstructionHandle = std::uint64_t;
+
 /// Opaque handle to one overlay scene. 0 is never a valid handle.
 using OverlayHandle = std::uint64_t;
+
+/// Opens an empty reconstruction session. The caller owns the handle.
+ReconstructionHandle reconstructionCreate();
+
+/// Frees a session. Destroying an unknown or already-destroyed handle is a no-op.
+void reconstructionDestroy(ReconstructionHandle handle);
+
+/// Adds a view from an 8-bit row-major gray image. Returns its index, or -1 when the image is
+/// unusable or yields no features.
+int reconstructionAddView(
+    ReconstructionHandle handle,
+    const unsigned char* gray,
+    int width_px,
+    int height_px,
+    double focal_px,
+    double cx_px,
+    double cy_px);
+
+/// Extracts features, matches every pair and reconstructs. Returns the number of registered views,
+/// or -1 for an unknown handle.
+int reconstructionRun(ReconstructionHandle handle);
+
+int reconstructionPointCount(ReconstructionHandle handle);
+
+/// Writes valid points as xyz into `positions_m`; returns how many were written.
+int reconstructionCopyPoints(ReconstructionHandle handle, double* positions_m, int max_points);
+
+/// Estimated pose of one reconstruction view. False for an out-of-range index.
+bool reconstructionCopyCamera(
+    ReconstructionHandle handle,
+    int index,
+    double out_rotation[9],
+    double out_centre_m[3]);
+
+/// Tracks a gray frame against the map by PnP. Returns the inlier count, 0 when the frame did not
+/// register; the pose is written only on success.
+int reconstructionTrackPose(
+    ReconstructionHandle handle,
+    const unsigned char* gray,
+    int width_px,
+    int height_px,
+    double focal_px,
+    double cx_px,
+    double cy_px,
+    double out_rotation[9],
+    double out_centre_m[3]);
 
 /// Floats per vertex written by overlayProject: {x_ndc, y_ndc, r, g, b} (roadmap 5.1).
 constexpr int kOverlayVertexValueCount = 5;

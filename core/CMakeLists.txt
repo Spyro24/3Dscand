@@ -33,6 +33,7 @@ add_library(scand3d_core SHARED
     sfm/pnp.cpp
     sfm/pose.cpp
     sfm/report.cpp
+    sfm/session.cpp
     sfm/triangulation.cpp
 )
 

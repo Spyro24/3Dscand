@@ -17,6 +17,7 @@ import com.scand3d.capture.SessionStore
 import com.scand3d.core.bridge.NativeCore
 import com.scand3d.core.bridge.NativeOrientationMath
 import com.scand3d.debug.CaptureTestBridge
+import com.scand3d.reconstruct.ReconstructionRunner
 import com.scand3d.render.OverlayCameraParams
 import com.scand3d.render.OverlayFeed
 import com.scand3d.render.OverlayGeometry
@@ -226,6 +227,77 @@ class CaptureViewModel(application: Application) :
         val clamped = opacity.coerceIn(0f, 1f)
         _state.value = _state.value.copy(overlayOpacity = clamped)
         OverlayFeed.setStyle(_state.value.overlayEnabled, clamped)
+    }
+
+    /**
+     * Reconstructs the newest saved session on a worker thread and loads the cloud into the
+     * overlay. This is the app-side path from captured frames to a sparse map that D030 records as
+     * missing; it is driven from the debug receiver because there is no review screen yet.
+     */
+    override fun reconstructLatestSession() {
+        val frames = latestSessionFrames(MAX_RECONSTRUCTION_FRAMES)
+        val camera = overlayCameraParams()
+        if (frames.isEmpty() || camera == null) {
+            Log.w(LOG_TAG, "reconstruct: ${frames.size} frames, camera=${camera != null}")
+            return
+        }
+        Log.i(LOG_TAG, "reconstruct: ${frames.size} frames")
+        Thread(
+            {
+                val outcome = ReconstructionRunner().run(frames, camera)
+                if (outcome.points == 0) {
+                    Log.w(
+                        LOG_TAG,
+                        "reconstruct: ${outcome.added_views} views, " +
+                            "${outcome.registered_views} registered, no points",
+                    )
+                    return@Thread
+                }
+                applyReconstruction(outcome.positions_m)
+            },
+            "reconstruction",
+        ).start()
+    }
+
+    private fun applyReconstruction(positions_m: DoubleArray) {
+        val handle = overlayHandle.takeIf { it != 0L } ?: NativeCore.overlayCreate().also {
+            overlayHandle = it
+        }
+        if (handle == 0L) {
+            Log.w(LOG_TAG, "reconstruct: overlay scene unavailable")
+            return
+        }
+
+        // Colours start white and are replaced by the keyframe sample below.
+        val colours = FloatArray(positions_m.size) { 1.0f }
+        if (!NativeCore.overlaySetPoints(handle, positions_m, colours)) {
+            Log.w(LOG_TAG, "reconstruct: overlay rejected the cloud")
+            return
+        }
+        overlayPointCount = positions_m.size / 3
+        overlayDemo = true
+        overlayReference = fusedImu.latest()?.quaternion_wxyz?.toDoubleArray()
+        Log.i(LOG_TAG, "reconstruct: ${overlayPointCount} points in the overlay")
+        sampleKeyframeColors()
+        publishOverlay()
+    }
+
+    /** Evenly spaced frames keep the baseline spread instead of clustering at the start. */
+    private fun latestSessionFrames(limit: Int): List<File> {
+        val sessions = File(getApplication<Application>().filesDir, SESSIONS_DIRECTORY)
+        val latest = sessions.listFiles()?.filter { it.isDirectory }?.maxByOrNull { it.name }
+            ?: return emptyList()
+        val frames = File(latest, FRAMES_DIRECTORY).listFiles()
+            ?.filter { it.isFile && it.extension == "jpg" }
+            ?.sortedBy { it.name }
+            ?: return emptyList()
+        if (frames.size <= limit) {
+            return frames
+        }
+        val step = frames.size.toDouble() / limit
+        return (0 until limit)
+            .map { frames[(it * step).toInt().coerceAtMost(frames.lastIndex)] }
+            .distinct()
     }
 
     /** Projects the scene on the live pose and hands the vertices to the renderer (5.1, 5.2). */
@@ -531,6 +603,7 @@ class CaptureViewModel(application: Application) :
         const val SENSOR_RATE_HZ = 200.0
         const val MEMORY_SAMPLE_EVERY = 10
         const val MAX_OVERLAY_VERTICES = 2048
+        const val MAX_RECONSTRUCTION_FRAMES = 12
         const val DEMO_POINT_COUNT = 64
         const val DEMO_RING_RADIUS_M = 0.18
         const val DEMO_RING_DISTANCE_M = 1.0

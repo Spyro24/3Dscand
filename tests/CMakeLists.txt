@@ -46,6 +46,7 @@ add_library(scand3d_test_util STATIC
     "${SCAND3D_CORE_DIR}/sfm/pnp.cpp"
     "${SCAND3D_CORE_DIR}/sfm/pose.cpp"
     "${SCAND3D_CORE_DIR}/sfm/report.cpp"
+    "${SCAND3D_CORE_DIR}/sfm/session.cpp"
     "${SCAND3D_CORE_DIR}/sfm/triangulation.cpp"
     synthetic/sfm_scan.cpp
     synthetic/synthetic_scene.cpp
@@ -112,6 +113,12 @@ add_executable(overlay_test
 )
 target_link_libraries(overlay_test PRIVATE scand3d_test_util GTest::gtest_main)
 gtest_discover_tests(overlay_test)
+
+add_executable(session_test
+    native/session_test.cpp
+)
+target_link_libraries(session_test PRIVATE scand3d_test_util GTest::gtest_main)
+gtest_discover_tests(session_test)
 
 add_executable(point_color_test
     native/point_color_test.cpp

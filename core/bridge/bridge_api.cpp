@@ -11,6 +11,7 @@
 
 #include "overlay/overlay_scene.hpp"
 #include "overlay/point_color.hpp"
+#include "sfm/session.hpp"
 #include "sensors/keyframe_prior.hpp"
 #include "sensors/mahony_filter.hpp"
 #include "sensors/tilt_orientation.hpp"
@@ -51,6 +52,12 @@ std::atomic<ImuHandle> g_next_handle{1};
 std::mutex g_overlay_mutex;
 std::unordered_map<OverlayHandle, overlay::OverlayScene> g_overlay_scenes;
 std::atomic<OverlayHandle> g_next_overlay_handle{1};
+
+// A reconstruction run takes seconds, so it keeps its own lock and never blocks the IMU or the
+// overlay path.
+std::mutex g_reconstruction_mutex;
+std::unordered_map<ReconstructionHandle, std::unique_ptr<sfm::Session>> g_reconstructions;
+std::atomic<ReconstructionHandle> g_next_reconstruction_handle{1};
 
 sensors::Quat quatFromArray(const double values[4]) {
     return {values[0], values[1], values[2], values[3]};
@@ -299,6 +306,109 @@ int overlayProject(
         out[4] = vertex.rgb[2];
     }
     return written;
+}
+
+ReconstructionHandle reconstructionCreate() {
+    const ReconstructionHandle handle = g_next_reconstruction_handle.fetch_add(1);
+    std::lock_guard<std::mutex> lock(g_reconstruction_mutex);
+    g_reconstructions.emplace(handle, std::make_unique<sfm::Session>());
+    return handle;
+}
+
+void reconstructionDestroy(ReconstructionHandle handle) {
+    std::lock_guard<std::mutex> lock(g_reconstruction_mutex);
+    g_reconstructions.erase(handle);
+}
+
+int reconstructionAddView(
+    ReconstructionHandle handle,
+    const unsigned char* gray,
+    int width_px,
+    int height_px,
+    double focal_px,
+    double cx_px,
+    double cy_px) {
+    if (gray == nullptr) {
+        return -1;
+    }
+    std::lock_guard<std::mutex> lock(g_reconstruction_mutex);
+    const auto it = g_reconstructions.find(handle);
+    if (it == g_reconstructions.end()) {
+        return -1;
+    }
+    return it->second->addView(width_px, height_px, gray, focal_px, cx_px, cy_px);
+}
+
+int reconstructionRun(ReconstructionHandle handle) {
+    std::lock_guard<std::mutex> lock(g_reconstruction_mutex);
+    const auto it = g_reconstructions.find(handle);
+    if (it == g_reconstructions.end()) {
+        return -1;
+    }
+    return it->second->run().views_registered;
+}
+
+int reconstructionPointCount(ReconstructionHandle handle) {
+    std::lock_guard<std::mutex> lock(g_reconstruction_mutex);
+    const auto it = g_reconstructions.find(handle);
+    if (it == g_reconstructions.end()) {
+        return 0;
+    }
+    return it->second->pointCount();
+}
+
+int reconstructionCopyPoints(ReconstructionHandle handle, double* positions_m, int max_points) {
+    std::lock_guard<std::mutex> lock(g_reconstruction_mutex);
+    const auto it = g_reconstructions.find(handle);
+    if (it == g_reconstructions.end()) {
+        return 0;
+    }
+    return it->second->copyPoints(positions_m, max_points);
+}
+
+bool reconstructionCopyCamera(
+    ReconstructionHandle handle,
+    int index,
+    double out_rotation[9],
+    double out_centre_m[3]) {
+    std::lock_guard<std::mutex> lock(g_reconstruction_mutex);
+    const auto it = g_reconstructions.find(handle);
+    if (it == g_reconstructions.end()) {
+        return false;
+    }
+    return it->second->copyCamera(index, out_rotation, out_centre_m);
+}
+
+int reconstructionTrackPose(
+    ReconstructionHandle handle,
+    const unsigned char* gray,
+    int width_px,
+    int height_px,
+    double focal_px,
+    double cx_px,
+    double cy_px,
+    double out_rotation[9],
+    double out_centre_m[3]) {
+    if (gray == nullptr || out_rotation == nullptr || out_centre_m == nullptr) {
+        return 0;
+    }
+    std::lock_guard<std::mutex> lock(g_reconstruction_mutex);
+    const auto it = g_reconstructions.find(handle);
+    if (it == g_reconstructions.end()) {
+        return 0;
+    }
+    sfm::Pose pose;
+    int inliers = 0;
+    if (!it->second->trackPose(width_px, height_px, gray, focal_px, cx_px, cy_px, pose, inliers)) {
+        return 0;
+    }
+    for (int i = 0; i < 9; ++i) {
+        out_rotation[i] = pose.rotation[static_cast<std::size_t>(i)];
+    }
+    for (int i = 0; i < 3; ++i) {
+        out_centre_m[i] = pose.camera_centre_m[static_cast<std::size_t>(i)];
+    }
+    return inliers;
 }
 
 int overlaySampleColors(

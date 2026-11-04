@@ -33,6 +33,11 @@ class CaptureTestReceiver : BroadcastReceiver() {
                 Log.i(LOG_TAG, "simulated camera loss requested")
             }
 
+            RECONSTRUCT -> {
+                actions.reconstructLatestSession()
+                Log.i(LOG_TAG, "reconstruct requested")
+            }
+
             OVERLAY -> {
                 val enabled = intent.getStringExtra(VALUE) == "on"
                 actions.setOverlayDemo(enabled)
@@ -51,5 +56,6 @@ class CaptureTestReceiver : BroadcastReceiver() {
         const val STOP = "stop"
         const val LOSS = "loss"
         const val OVERLAY = "overlay"
+        const val RECONSTRUCT = "reconstruct"
     }
 }

@@ -103,6 +103,113 @@ Java_com_scand3d_core_bridge_NativeCore_nativeKeyframeBaselineAccept(
     return accepted ? JNI_TRUE : JNI_FALSE;
 }
 
+namespace {
+// Copies a Kotlin byte array into a vector of unsigned bytes; empty when the array is null.
+std::vector<unsigned char> readGray(JNIEnv* env, jbyteArray source) {
+    std::vector<unsigned char> gray;
+    if (source == nullptr) {
+        return gray;
+    }
+    const jsize length = env->GetArrayLength(source);
+    gray.resize(static_cast<std::size_t>(length));
+    env->GetByteArrayRegion(source, 0, length, reinterpret_cast<jbyte*>(gray.data()));
+    return gray;
+}
+}  // namespace
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionCreate(JNIEnv* /*env*/,
+                                                                   jobject /*instance*/) {
+    return static_cast<jlong>(scand3d::bridge::reconstructionCreate());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionDestroy(JNIEnv* /*env*/,
+                                                                    jobject /*instance*/,
+                                                                    jlong handle) {
+    scand3d::bridge::reconstructionDestroy(
+        static_cast<scand3d::bridge::ReconstructionHandle>(handle));
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionAddView(
+    JNIEnv* env, jobject /*instance*/, jlong handle, jbyteArray gray, jint width_px, jint height_px,
+    jdouble focal_px, jdouble cx_px, jdouble cy_px) {
+    const std::vector<unsigned char> pixels = readGray(env, gray);
+    if (pixels.empty() || width_px <= 0 || height_px <= 0 ||
+        pixels.size() != static_cast<std::size_t>(width_px) * static_cast<std::size_t>(height_px)) {
+        return -1;
+    }
+    return scand3d::bridge::reconstructionAddView(
+        static_cast<scand3d::bridge::ReconstructionHandle>(handle), pixels.data(), width_px,
+        height_px, focal_px, cx_px, cy_px);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionRun(JNIEnv* /*env*/,
+                                                                jobject /*instance*/,
+                                                                jlong handle) {
+    return scand3d::bridge::reconstructionRun(
+        static_cast<scand3d::bridge::ReconstructionHandle>(handle));
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionPointCount(JNIEnv* /*env*/,
+                                                                       jobject /*instance*/,
+                                                                       jlong handle) {
+    return scand3d::bridge::reconstructionPointCount(
+        static_cast<scand3d::bridge::ReconstructionHandle>(handle));
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionCopyPoints(
+    JNIEnv* env, jobject /*instance*/, jlong handle, jdoubleArray out_positions) {
+    if (out_positions == nullptr) {
+        return 0;
+    }
+    const jsize length = env->GetArrayLength(out_positions);
+    const int max_points = length / 3;
+    if (max_points <= 0) {
+        return 0;
+    }
+    std::vector<double> positions(static_cast<std::size_t>(max_points) * 3);
+    const int written = scand3d::bridge::reconstructionCopyPoints(
+        static_cast<scand3d::bridge::ReconstructionHandle>(handle), positions.data(),
+        max_points);
+    if (written <= 0) {
+        return 0;
+    }
+    env->SetDoubleArrayRegion(out_positions, 0, written * 3, positions.data());
+    return written;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionTrackPose(
+    JNIEnv* env, jobject /*instance*/, jlong handle, jbyteArray gray, jint width_px, jint height_px,
+    jdouble focal_px, jdouble cx_px, jdouble cy_px, jdoubleArray out_rotation,
+    jdoubleArray out_centre_m) {
+    if (out_rotation == nullptr || out_centre_m == nullptr ||
+        env->GetArrayLength(out_rotation) < 9 || env->GetArrayLength(out_centre_m) < 3) {
+        return 0;
+    }
+    const std::vector<unsigned char> pixels = readGray(env, gray);
+    if (pixels.empty() || width_px <= 0 || height_px <= 0 ||
+        pixels.size() != static_cast<std::size_t>(width_px) * static_cast<std::size_t>(height_px)) {
+        return 0;
+    }
+    double rotation[9] = {};
+    double centre[3] = {};
+    const int inliers = scand3d::bridge::reconstructionTrackPose(
+        static_cast<scand3d::bridge::ReconstructionHandle>(handle), pixels.data(), width_px,
+        height_px, focal_px, cx_px, cy_px, rotation, centre);
+    if (inliers <= 0) {
+        return 0;
+    }
+    env->SetDoubleArrayRegion(out_rotation, 0, 9, rotation);
+    env->SetDoubleArrayRegion(out_centre_m, 0, 3, centre);
+    return inliers;
+}
+
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_scand3d_core_bridge_NativeCore_nativeOverlayCreate(JNIEnv* /*env*/, jobject /*instance*/) {
     return static_cast<jlong>(scand3d::bridge::overlayCreate());
