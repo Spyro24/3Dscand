@@ -519,3 +519,20 @@ here with its version, license and reason (agents.md sections 2 and 7).
 - **Consequence:** on the SM-G930F the preview fills the screen upright and the live cloud reads
   clearly during a capture (124 points at eight views, all projecting). Verified with device
   screenshots rather than by inference; the frames are in `app/build/shot*.png`.
+
+### D041 - The capture screen follows the reference camera layout
+- **Decision:** the capture screen is laid out like the reference camera app: the preview fills the
+  top edge to edge, a control strip under it carries the focus-lock indicator, the camera's fixed
+  1x value and the colour-overlay toggle, then a divider, a shutter row with the newest keyframe as
+  the gallery tile, a round shutter and a flip glyph, and mode tabs with SCAN active. The preview
+  renderer crops the upright image to the preview box's aspect instead of letterboxing it, and the
+  overlay points are scaled by the same crop so projection stays aligned. The opacity slider is a
+  slim white strip rather than a themed Material slider.
+- **Reason:** the screen was a status panel, a full-width text button and a Material slider stacked
+  over the preview, which reads nothing like a camera app. Cropping is also what keeps the preview
+  free of black bars inside the boxed area: the sensor image is 9:16 and the box is 0.83.
+- **Consequence:** verified on device (`app/build/ui1_small.png` idle, `app/build/ui2_small.png`
+  mid-capture):
+  during a capture 123 of 123 points project over the live image. PHOTO and VIDEO tabs and the flip
+  glyph are drawn dimmed and are not interactive, because the app scans only and has one camera; the
+  focus square is a lock indicator, not a control, so it never invites a tap it cannot honour.

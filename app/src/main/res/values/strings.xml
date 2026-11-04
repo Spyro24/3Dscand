@@ -19,6 +19,12 @@
     <string name="capture_imu_reduced_accuracy">Reduced orientation accuracy (no gyroscope)</string>
     <string name="capture_motion_blur">Moving too fast — hold still</string>
     <string name="overlay_toggle_label">Color overlay</string>
+    <string name="capture_zoom_value">1×</string>
+    <string name="capture_tab_photo">PHOTO</string>
+    <string name="capture_tab_video">VIDEO</string>
+    <string name="capture_tab_scan">SCAN</string>
+    <string name="capture_gallery_description">Newest saved frame</string>
+    <string name="capture_flip_label">Flip camera</string>
     <string name="overlay_opacity_label">Overlay opacity</string>
 
     <string name="permission_denied_title">Camera access denied</string>

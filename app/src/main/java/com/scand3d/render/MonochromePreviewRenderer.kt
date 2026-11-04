@@ -32,6 +32,7 @@ class MonochromePreviewRenderer(
     private var matrixHandle = 0
     private var textureHandle = 0
     private var rotationHandle = 0
+    private var cropHandle = 0
     private val textureMatrix = FloatArray(16)
     private val vertexBuffer = GlBuffers.floatBuffer(
         floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f),
@@ -50,6 +51,11 @@ class MonochromePreviewRenderer(
     private var pointOpacityHandle = 0
     private var pointSizeHandle = 0
     private var pointRotationHandle = 0
+    private var pointCropHandle = 0
+
+    /// xy is the sampled fraction of the image, zw its offset; the preview fills its box by
+    /// cropping the image to the box's aspect instead of letterboxing it (D041).
+    private val crop = FloatArray(4) { if (it < 2) 1f else 0f }
     private var overlayBuffer: FloatBuffer? = null
     private var overlayVertexCount = 0
     private var pendingOverlay: FloatArray? = null
@@ -68,6 +74,7 @@ class MonochromePreviewRenderer(
         matrixHandle = GLES20.glGetUniformLocation(program, "uTexMatrix")
         textureHandle = GLES20.glGetUniformLocation(program, "uTexture")
         rotationHandle = GLES20.glGetUniformLocation(program, "uRotation")
+        cropHandle = GLES20.glGetUniformLocation(program, "uCrop")
 
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
@@ -93,6 +100,7 @@ class MonochromePreviewRenderer(
         pointOpacityHandle = GLES20.glGetUniformLocation(pointsProgram, "uOpacity")
         pointSizeHandle = GLES20.glGetUniformLocation(pointsProgram, "uPointSize")
         pointRotationHandle = GLES20.glGetUniformLocation(pointsProgram, "uRotation")
+        pointCropHandle = GLES20.glGetUniformLocation(pointsProgram, "uCrop")
         // Replays the last published scene and style into a renderer that was just rebuilt.
         OverlayFeed.bind(::submitOverlay, ::applyOverlayStyle)
     }
@@ -116,23 +124,21 @@ class MonochromePreviewRenderer(
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-        // Letterbox the camera image so its aspect ratio survives the surface's shape. The displayed
-        // image is the sensor image turned upright, so a quarter turn swaps its edges.
+        // The preview fills its box: the upright image is cropped to the box's aspect rather than
+        // letterboxed into it, which is what a camera app shows and what the reference layout
+        // needs (D041). A quarter turn swaps the image's edges before the aspect is compared.
         val swapsEdges = quarterTurns == 1f || quarterTurns == 3f
         val displayWidthPx = if (swapsEdges) textureHeightPx else textureWidthPx
         val displayHeightPx = if (swapsEdges) textureWidthPx else textureHeightPx
         val viewAspect = viewportWidthPx.toFloat() / viewportHeightPx.toFloat()
-        val textureAspect = displayWidthPx.toFloat() / displayHeightPx.toFloat()
-        val drawWidth: Int
-        val drawHeight: Int
-        if (viewAspect > textureAspect) {
-            drawHeight = viewportHeightPx
-            drawWidth = (viewportHeightPx * textureAspect).toInt()
-        } else {
-            drawWidth = viewportWidthPx
-            drawHeight = (viewportWidthPx / textureAspect).toInt()
-        }
-        GLES20.glViewport((viewportWidthPx - drawWidth) / 2, (viewportHeightPx - drawHeight) / 2, drawWidth, drawHeight)
+        val imageAspect = displayWidthPx.toFloat() / displayHeightPx.toFloat()
+        val cropX = if (viewAspect > imageAspect) 1f else viewAspect / imageAspect
+        val cropY = if (viewAspect > imageAspect) imageAspect / viewAspect else 1f
+        crop[0] = cropX
+        crop[1] = cropY
+        crop[2] = (1f - cropX) / 2f
+        crop[3] = (1f - cropY) / 2f
+        GLES20.glViewport(0, 0, viewportWidthPx, viewportHeightPx)
 
         GLES20.glUseProgram(program)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -140,6 +146,7 @@ class MonochromePreviewRenderer(
         GLES20.glUniform1i(textureHandle, 0)
         GLES20.glUniformMatrix4fv(matrixHandle, 1, false, textureMatrix, 0)
         GLES20.glUniform1f(rotationHandle, quarterTurns)
+        GLES20.glUniform4fv(cropHandle, 1, crop, 0)
 
         GLES20.glEnableVertexAttribArray(positionHandle)
         GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
@@ -197,6 +204,7 @@ class MonochromePreviewRenderer(
         GLES20.glUniform1f(pointOpacityHandle, overlayOpacity)
         GLES20.glUniform1f(pointSizeHandle, OVERLAY_POINT_SIZE_PX)
         GLES20.glUniform1f(pointRotationHandle, quarterTurns)
+        GLES20.glUniform4fv(pointCropHandle, 1, crop, 0)
 
         GLES20.glEnableVertexAttribArray(pointPositionHandle)
         GLES20.glVertexAttribPointer(
@@ -255,6 +263,7 @@ class MonochromePreviewRenderer(
             attribute vec4 aTexCoord;
             uniform mat4 uTexMatrix;
             uniform float uRotation;
+            uniform vec4 uCrop;
             varying vec2 vTexCoord;
             void main() {
                 gl_Position = aPosition;
@@ -267,7 +276,7 @@ class MonochromePreviewRenderer(
                 } else if (quarter > 0.5) {
                     uv = vec2(1.0 - uv.y, uv.x);
                 }
-                vTexCoord = uv;
+                vTexCoord = uCrop.zw + uv * uCrop.xy;
             }
         """
 
@@ -279,6 +288,7 @@ class MonochromePreviewRenderer(
             attribute vec3 aColor;
             uniform float uPointSize;
             uniform float uRotation;
+            uniform vec4 uCrop;
             varying vec3 vColor;
             void main() {
                 vec2 p = aPosition;
@@ -290,7 +300,7 @@ class MonochromePreviewRenderer(
                 } else if (quarter > 0.5) {
                     p = vec2(p.y, -p.x);
                 }
-                gl_Position = vec4(p, 0.0, 1.0);
+                gl_Position = vec4(p / uCrop.xy, 0.0, 1.0);
                 gl_PointSize = uPointSize;
                 vColor = aColor;
             }
