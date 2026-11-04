@@ -25,6 +25,12 @@ object CaptureTestBridge {
 
         /** Runs the dense stage on the newest saved session (roadmap 6). */
         fun runDensePass()
+
+        /** Debug only: drives the manual exposure slider without a tap (D059). */
+        fun setManualExposure(ns: Long)
+
+        /** Debug only: drives the manual focus slider without a tap (D059). */
+        fun setManualFocus(diopter: Float)
     }
 
     @Volatile

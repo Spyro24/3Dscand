@@ -49,6 +49,19 @@ class CaptureTestReceiver : BroadcastReceiver() {
                 Log.i(LOG_TAG, "overlay demo ${if (enabled) "on" else "off"}")
             }
 
+            EXPOSURE -> {
+                // Milliseconds, because the slider is in ms; 0 means "back to the locked value".
+                val ms = intent.getStringExtra(VALUE)?.toLongOrNull() ?: 33L
+                actions.setManualExposure(ms * 1_000_000L)
+                Log.i(LOG_TAG, "manual exposure $ms ms requested")
+            }
+
+            FOCUS -> {
+                val diopter = intent.getStringExtra(VALUE)?.toFloatOrNull() ?: 0f
+                actions.setManualFocus(diopter)
+                Log.i(LOG_TAG, "manual focus $diopter diopter requested")
+            }
+
             ORIENTATION -> {
                 val deg = intent.getStringExtra(VALUE)?.toIntOrNull() ?: 0
                 actions.setPreviewRotationDeg(deg)
@@ -70,5 +83,7 @@ class CaptureTestReceiver : BroadcastReceiver() {
         const val RECONSTRUCT = "reconstruct"
         const val DENSE = "dense"
         const val ORIENTATION = "orientation"
+        const val EXPOSURE = "exposure"
+        const val FOCUS = "focus"
     }
 }

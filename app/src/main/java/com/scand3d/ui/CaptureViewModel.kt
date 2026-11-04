@@ -279,15 +279,15 @@ class CaptureViewModel(application: Application) :
         OverlayFeed.setStyle(_state.value.overlayEnabled, clamped)
     }
 
-    /** UI: manual exposure for the stills; 0 returns to the locked value (D059). */
-    fun setManualExposure(ns: Long) {
+    /** UI: manual exposure; 0 returns to the locked value (D059). */
+    override fun setManualExposure(ns: Long) {
         val clamped = ns.coerceIn(0L, 100_000_000L)
         _state.value = _state.value.copy(manualExposureNs = clamped)
         controller?.setManualExposure(clamped)
     }
 
     /** UI: manual focus in dioptres; negative returns to the locked value (D059). */
-    fun setManualFocus(diopter: Float) {
+    override fun setManualFocus(diopter: Float) {
         val clamped = if (diopter < 0f) -1f else diopter.coerceIn(0f, 10f)
         _state.value = _state.value.copy(manualFocusDiopter = clamped)
         controller?.setManualFocus(clamped)
