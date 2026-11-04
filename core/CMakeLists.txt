@@ -13,6 +13,9 @@ add_library(scand3d_core SHARED
     bridge/bridge_api.cpp
     bridge/jni_bridge.cpp
     bridge/native_init.cpp
+    sensors/keyframe_prior.cpp
+    sensors/mahony_filter.cpp
+    sensors/tilt_orientation.cpp
 )
 
 target_include_directories(scand3d_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")

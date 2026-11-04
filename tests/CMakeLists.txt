@@ -26,6 +26,9 @@ FetchContent_MakeAvailable(googletest)
 # utility. Each test executable is a thin wrapper over this library.
 add_library(scand3d_test_util STATIC
     "${SCAND3D_CORE_DIR}/bridge/bridge_api.cpp"
+    "${SCAND3D_CORE_DIR}/sensors/keyframe_prior.cpp"
+    "${SCAND3D_CORE_DIR}/sensors/mahony_filter.cpp"
+    "${SCAND3D_CORE_DIR}/sensors/tilt_orientation.cpp"
     synthetic/synthetic_scene.cpp
 )
 target_include_directories(scand3d_test_util PUBLIC
@@ -40,6 +43,12 @@ add_executable(bridge_api_test
 )
 target_link_libraries(bridge_api_test PRIVATE scand3d_test_util GTest::gtest_main)
 gtest_discover_tests(bridge_api_test)
+
+add_executable(imu_fusion_test
+    native/imu_fusion_test.cpp
+)
+target_link_libraries(imu_fusion_test PRIVATE scand3d_test_util GTest::gtest_main)
+gtest_discover_tests(imu_fusion_test)
 
 add_executable(synthetic_scene_test
     native/synthetic_scene_test.cpp
