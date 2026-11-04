@@ -606,3 +606,72 @@ here with its version, license and reason (agents.md sections 2 and 7).
 - **Consequence:** the add-on shows geometry only, and its PLY reader accepts any `x`/`y`/`z`
   point PLY, so a hand-pulled or Phase 9 cloud opens the same way. A future colour or tracking-pose
   stream extends the file format, not the transport.
+
+### D045 - A pixel carries a plane, not a depth, and a log sweep gives it its first plane
+- **Decision:** `mvs::estimateDepth` stores a depth and a camera-frame normal per pixel. The cost of
+  a hypothesis is `1 - ZNCC` over a 5x5 patch of the reference image, warped into the neighbour
+  through the homography that a plane at that depth and normal induces
+  (`K_n (R + t n^T / (n . X)) K_r^-1`). The first hypothesis per pixel comes from a log-spaced sweep
+  of 32 depths with the normal facing the camera; four passes of spatial propagation and six random
+  plane trials per pixel then refine it. A pixel whose best cost stays above 0.5 keeps no depth.
+- **Reason:** a single depth per pixel cannot match a surface that is oblique to either camera,
+  which is most of a turntable scan. Initialising from a sweep rather than from random planes means
+  propagation starts from a plane that is already close, so the sweeps that follow have something
+  useful to move; the earlier random-only initialisation pinned estimates at the end of the range.
+  ZNCC is invariant to the exposure difference between views, and the fixed seed keeps a capture
+  reproducible (the same images give the same map twice).
+- **Verified:** `PatchMatchTest.RecoversTheSurfaceOfTheTurntableBox` reaches the box at under 20 mm
+  mean distance and marks at least 5 percent of the pixels; `AFlatImageYieldsNoDepth` keeps a
+  textureless image empty. On the full turntable the fused cloud is within millimetres of the mesh
+  at every preset (`docs/benchmarks/phase6-mvs-verification.md`).
+- **Consequence:** one depth map costs roughly 60 cost evaluations per pixel, which is what the
+  worker pool and the working-width presets are for. A hard cap of 0.5 (ZNCC 0.5) is what removes
+  the background where the texture is weak, but a background with strong texture would still keep
+  depth until Phase 7 masks it out.
+
+### D046 - Fused points are the mean of their observations in a 4 mm voxel
+- **Decision:** `mvs::fuseDepths` puts every valid depth sample into a voxel of the grid anchored at
+  the world origin, averages the world positions and the gray value of all observations in that
+  voxel, and reports the observation count and the mean cost. `min_observations` drops voxels seen
+  too few times. The output is sorted by voxel key so two runs on one capture give the same order.
+- **Reason:** a depth map has one point per pixel per view, so a 16-view scan would otherwise ship
+  sixteen surfaces a few millimetres apart; averaging in a voxel collapses them into one point whose
+  position is better than any single observation. Sorting makes the result deterministic and lets a
+  caller compare runs without hashing.
+- **Verified:** `FusionTest.AveragesTwoDepthMapsIntoOnePlane` fuses two observations of one plane to
+  a single layer with the mean gray, and `min_observations = 2` keeps only what both views saw. The
+  fused turntable cloud is 4.7 mm from the ground truth at Normal quality.
+- **Consequence:** the point density is bounded by the voxel size, so a high preset adds observations
+  rather than resolution unless the voxel shrinks too. 4 mm was chosen against the 0.7 m object: a
+  2 mm voxel would hold several hundred thousand points for the same accuracy.
+
+### D047 - Views are estimated on a small worker pool, and the tests build optimised
+- **Decision:** `reconstructDense` runs the per-view depth estimation and the per-view consistency
+  filter on `std::thread` workers sized from `hardware_concurrency`, capped at eight. Results are
+  written into per-view slots and every estimate seeds its own random sequence, so the output does
+  not depend on the thread count or on scheduling. Progress is reported under a mutex as views
+  finish. The host test build defaults to `RelWithDebInfo`.
+- **Reason:** the views are independent, and 100 images took 517 s serially against a "few minutes"
+  budget - the phase could not meet its acceptance line without using the cores the app already has
+  (agents.md lists the MVS worker pool). The unoptimised host build was three times slower than the
+  code actually is, which made the timing numbers meaningless and the suite slow for no benefit.
+- **Verified:** the 100-image Draft run takes 76 s with the pool versus 517 s without, on the same
+  binary and scene. The whole native suite runs in 63 s (150 s unpooled). `mvs_test` passes with the
+  pool, including the cancellation case, which now asserts that most views do not finish.
+- **Consequence:** the first progress callback can arrive after several views have finished, so a
+  caller cannot assume cancellation stops exactly one view. Peak memory grows with the pool, because
+  each worker holds one depth map at a time; at the presets here that is a few megabytes.
+
+### D048 - Completeness is scored over the surface the capture could see
+- **Decision:** `chamferToMesh` takes the camera poses of the capture and samples only triangles with
+  at least one camera on their front side. Accuracy is still measured over every fused point. The
+  Phase 6 acceptance numbers are 10 mm accuracy and 15 mm completeness at Draft, measured on the
+  1.200 m2 of box a ring at the object centre observes.
+- **Reason:** a turntable ring never sees the top or the underside of the object, so scoring them
+  would report the capture strategy as reconstruction error: before the filter, the same cloud
+  scored 35 mm completeness purely because those faces were never observed.
+- **Verified:** the filtered area is 1.200 m2, exactly the four sides of the 0.70 x 0.50 x 0.50 m
+  box, and the pipeline test asserts that number so a change to the filter cannot pass silently.
+  Measured completeness is 9.2 mm at Draft and 6.7 mm at Normal.
+- **Consequence:** the number is honest for a turntable capture and says nothing about surfaces the
+  scan missed entirely; a coverage claim needs the area actually captured, not this metric.

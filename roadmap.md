@@ -188,13 +188,31 @@ anchored pose and the live one and the projected centre of the cloud, in NDC (D0
 ## Phase 6 - Dense reconstruction (MVS)
 Goal: dense depth and a dense colored point cloud.
 
-- [ ] 6.1 PatchMatch stereo depth estimation per keyframe
-- [ ] 6.2 Geometric consistency filter across views
-- [ ] 6.3 Depth fusion into a point cloud
-- [ ] 6.4 Processing at reduced resolution with a quality setting
-- [ ] 6.5 Cancellation and progress reporting
+- [x] 6.1 PatchMatch stereo depth estimation per keyframe
+- [x] 6.2 Geometric consistency filter across views
+- [x] 6.3 Depth fusion into a point cloud
+- [x] 6.4 Processing at reduced resolution with a quality setting
+- [x] 6.5 Cancellation and progress reporting
 
 **Acceptance:** Chamfer distance to synthetic ground truth below the threshold in `docs/benchmarks/`; 100 images finish within the performance budget in agents.md.
+
+**Status:** all five tasks are implemented in `core/mvs/` and measured on the synthetic turntable
+(`docs/benchmarks/phase6-mvs-verification.md`). 6.1 estimates a plane per pixel - depth plus normal
+- scored by a 5x5 ZNCC of the reference patch warped through the plane's homography, seeded by a
+log-spaced plane sweep and refined by spatial propagation and random search (D045). 6.2 keeps a
+pixel only when the neighbour projects it back onto the same pixel within the depth tolerance. 6.3
+fuses the surviving depths into 4 mm voxels, averaging position and gray (D046). 6.4 resamples every
+view to the working width of the preset (Draft 160, Normal 320, High 480 px) and the width is now
+exact instead of a halving chain. 6.5 feeds an `std::atomic<bool>` and a progress callback into the
+per-view loop, which runs on a small worker pool (D047).
+
+The synthetic acceptance is met on the host: 4.7 mm Chamfer accuracy and 6.7 mm completeness at
+Normal quality (16 views, scored over the four sides a ring can actually see, D048), and 100 images
+at Draft finish in 76 s against the "few minutes" budget. Two limits matter. Nothing has been
+measured on the SM-G930F or on a real capture, and the dense cloud is not in the app: there is no
+JNI entry point and no UI path, so the overlay still draws the sparse map and wiring it stays a
+public-interface change. Fusion also stores one gray value per point; the goal's "colored" cloud
+needs the app-side keyframe sampler that already colours the overlay (D033).
 
 ---
 

@@ -193,6 +193,37 @@ logs once a second the anchored-to-live pose angle and the cloud's projected cen
 app has no capture-to-reconstruction path yet (D030), the scene is still a debug-only canned cloud,
 marked `// STUB`, so no frame of reference exists to compare against a real object.
 
+## Dense reconstruction (Phase 6)
+
+```
+keyframes as gray images plus poses (Phase 4 output), optional sparse points
+  └─ reconstructDense (core/mvs/pipeline.cpp)
+       ├─ resample every view to the preset's working width (Draft 160 / Normal 320 / High 480)
+       ├─ per view, against its nearest neighbour: estimateDepth (core/mvs/patchmatch.cpp)
+       │    ├─ plane per pixel: depth + normal, 5x5 ZNCC of the warped patch
+       │    ├─ log-spaced plane sweep for the first plane, then propagation + random search
+       │    └─ a plane whose best cost is above max_cost keeps no depth (ZNCC below 0.5)
+       ├─ filterByConsistency: forward-backward depth and pixel check (core/mvs/consistency.cpp)
+       └─ fuseDepths: 4 mm voxels, mean position and gray, sorted output (core/mvs/fusion.cpp)
+            └─ { points, per-view depth maps, stats }
+```
+
+`core/mvs/` depends only on `core/feature/`, `core/geometry/` and `core/sfm/types.hpp`, so it takes
+gray images and camera models and nothing Android. Depth is a plane per pixel rather than a single
+depth, which is what lets a slanted surface match across a baseline (D045); the plane sweep is the
+initial guess and propagation plus random search does the work, with a fixed seed so one capture
+gives one depth map twice. Sparse map points, when the caller has them, narrow the search to the
+range the reconstruction occupies instead of the full 0.1-10 m range.
+
+The views are independent - each owns its depth map and its own random sequence - so the per-view
+loop runs on a small worker pool sized from `hardware_concurrency` and capped at eight, the thread
+count agents.md lists for MVS (D047). Fusion then runs once over the surviving maps, so a cloud is
+only published when the run was not cancelled.
+
+Nothing in the app calls this yet: the bridge has no dense entry point and the overlay still draws
+the sparse map. The desktop binary `tests/tools/mvs_report.cpp` is what prints the acceptance
+numbers, and it is built only in `nativeTest`.
+
 ## Capture to reconstruction (app wiring)
 
 ```
@@ -259,7 +290,14 @@ that rotation every point has negative depth and nothing is drawn.
 a saved session through `sfm::Session` and load it into the overlay, but only the seed pair
   reconstructs reliably on synthetic data, so the overlay's default content is still the debug cloud. 5.5 is open and the whole
   phase stays unaccepted until a real cloud exists (D031-D036).
-- Phases 6 and later are unimplemented; `roadmap.md` is the source of truth.
+- Phase 6 implemented, synthetic acceptance met: PatchMatch stereo depth per view, the
+  forward-backward consistency filter, voxel fusion, the Draft/Normal/High working widths and
+  cancellation with progress are in place and covered by nine host tests. On the synthetic turntable
+  the fused cloud is 4.7 mm from the ground truth at Normal quality and 100 images at Draft take
+  76 s on the host, inside the "few minutes" budget. Not measured on the SM-G930F and not wired into
+  the app: there is no dense entry point in the bridge, so the overlay still shows the sparse map
+  (D045-D048, `docs/benchmarks/phase6-mvs-verification.md`).
+- Phases 7 and later are unimplemented; `roadmap.md` is the source of truth.
 
 The preview is drawn in whatever orientation the camera's texture transform delivers: on the
 SM-G930F that transform transposes the buffer, so the preview takes no extra rotation while the

@@ -9,6 +9,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# The host tests and the desktop report tools run the same numeric work as the app, so they build
+# optimised by default: an unoptimised build is several times slower and made timing numbers
+# meaningless (Phase 6 reported 100 views far outside the budget for that reason alone).
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
+
 set(SCAND3D_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../core")
 
 enable_testing()
@@ -34,6 +41,11 @@ add_library(scand3d_test_util STATIC
     "${SCAND3D_CORE_DIR}/feature/matcher.cpp"
     "${SCAND3D_CORE_DIR}/geometry/linalg.cpp"
     "${SCAND3D_CORE_DIR}/geometry/two_view.cpp"
+    "${SCAND3D_CORE_DIR}/mvs/consistency.cpp"
+    "${SCAND3D_CORE_DIR}/mvs/fusion.cpp"
+    "${SCAND3D_CORE_DIR}/mvs/patchmatch.cpp"
+    "${SCAND3D_CORE_DIR}/mvs/pipeline.cpp"
+    "${SCAND3D_CORE_DIR}/mvs/types.cpp"
     "${SCAND3D_CORE_DIR}/overlay/overlay_scene.cpp"
     "${SCAND3D_CORE_DIR}/overlay/point_color.cpp"
     "${SCAND3D_CORE_DIR}/sensors/keyframe_prior.cpp"
@@ -57,6 +69,8 @@ target_include_directories(scand3d_test_util PUBLIC
     "${SCAND3D_CORE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
+find_package(Threads REQUIRED)
+target_link_libraries(scand3d_test_util PUBLIC Threads::Threads)
 
 include(GoogleTest)
 
@@ -131,3 +145,15 @@ add_executable(synthetic_scene_test
 )
 target_link_libraries(synthetic_scene_test PRIVATE scand3d_test_util GTest::gtest_main)
 gtest_discover_tests(synthetic_scene_test)
+
+add_executable(mvs_test
+    native/mvs_test.cpp
+)
+target_link_libraries(mvs_test PRIVATE scand3d_test_util GTest::gtest_main)
+gtest_discover_tests(mvs_test)
+
+# Desktop-only dense reconstruction report (roadmap 6.1-6.5); never part of the APK.
+add_executable(mvs_report
+    tools/mvs_report.cpp
+)
+target_link_libraries(mvs_report PRIVATE scand3d_test_util)

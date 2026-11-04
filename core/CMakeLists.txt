@@ -21,6 +21,11 @@ add_library(scand3d_core SHARED
     feature/matcher.cpp
     geometry/linalg.cpp
     geometry/two_view.cpp
+    mvs/consistency.cpp
+    mvs/fusion.cpp
+    mvs/patchmatch.cpp
+    mvs/pipeline.cpp
+    mvs/types.cpp
     overlay/overlay_scene.cpp
     overlay/point_color.cpp
     sensors/keyframe_prior.cpp
@@ -38,6 +43,9 @@ add_library(scand3d_core SHARED
 )
 
 target_include_directories(scand3d_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+
+find_package(Threads REQUIRED)
+target_link_libraries(scand3d_core PRIVATE Threads::Threads)
 
 find_library(ANDROID_LOG_LIB log REQUIRED)
 target_link_libraries(scand3d_core PRIVATE "${ANDROID_LOG_LIB}")
