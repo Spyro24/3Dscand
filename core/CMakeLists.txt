@@ -14,6 +14,7 @@ add_library(scand3d_core SHARED
     bridge/jni_bridge.cpp
     bridge/native_init.cpp
     feature/brief_descriptor.cpp
+    feature/edge_map.cpp
     feature/fast_detector.cpp
     feature/feature_extractor.cpp
     feature/feature_store.cpp

@@ -26,6 +26,11 @@ struct PatchMatchOptions {
     double initial_normal_deg = 35.0;
     /// A pixel whose best cost is above this keeps no depth: 1 - ZNCC, so 0.5 means ZNCC 0.5.
     double max_cost = 0.5;
+
+    /// Sobel magnitude (0..255) the reference pixel needs before its depth is kept (D053). On a
+    /// flat patch the photometric cost matches anything, so the depth there is noise whatever the
+    /// cost says; this drops those pixels instead of fusing blobs. Zero disables the check.
+    int min_reference_gradient = 4;
 };
 
 /// Relative transform from the reference camera to the neighbour: X_neighbour = R * X_ref + t.

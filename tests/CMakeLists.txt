@@ -34,6 +34,7 @@ FetchContent_MakeAvailable(googletest)
 add_library(scand3d_test_util STATIC
     "${SCAND3D_CORE_DIR}/bridge/bridge_api.cpp"
     "${SCAND3D_CORE_DIR}/feature/brief_descriptor.cpp"
+    "${SCAND3D_CORE_DIR}/feature/edge_map.cpp"
     "${SCAND3D_CORE_DIR}/feature/fast_detector.cpp"
     "${SCAND3D_CORE_DIR}/feature/feature_extractor.cpp"
     "${SCAND3D_CORE_DIR}/feature/feature_store.cpp"
@@ -86,6 +87,12 @@ add_executable(imu_fusion_test
 )
 target_link_libraries(imu_fusion_test PRIVATE scand3d_test_util GTest::gtest_main)
 gtest_discover_tests(imu_fusion_test)
+
+add_executable(edge_test
+    native/edge_test.cpp
+)
+target_link_libraries(edge_test PRIVATE scand3d_test_util GTest::gtest_main)
+gtest_discover_tests(edge_test)
 
 add_executable(feature_test
     native/feature_test.cpp

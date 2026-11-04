@@ -81,6 +81,10 @@ known 3D point across two views. The real-object half (at least 100 verified inl
 been run: no phone and no real image pair were available (D026). `[~]` therefore means "code done,
 acceptance pending", exactly as in Phase 2. The pipeline is not yet reachable from the app; the
 bridge wiring belongs to Phase 4, which is also the first consumer of the matches.
+
+The edge map of D053 (`core/feature/edge_map.cpp`) is part of this phase: contours are extracted,
+tested and able to contribute contour keypoints, but the samples stay off by default because on the
+real scans they lowered match precision from 0.95 to 0.89 and the map from 101 points to 29.
 `docs/benchmarks/phase3-feature-verification.md` lists the measured numbers, the limits of that
 evidence, and what a real-image run still has to show.
 
@@ -208,7 +212,9 @@ pixel only when the neighbour projects it back onto the same pixel within the de
 fuses the surviving depths into 4 mm voxels, averaging position and gray (D046). 6.4 resamples every
 view to the working width of the preset (Draft 160, Normal 320, High 480 px) and the width is now
 exact instead of a halving chain. 6.5 feeds an `std::atomic<bool>` and a progress callback into the
-per-view loop, which runs on a small worker pool (D047).
+per-view loop, which runs on a small worker pool (D047). The depth pass also keeps a pixel only when the reference
+image has a Sobel gradient of at least 4 there (D053), which drops the 10 percent of points that had
+no evidence behind them: 38827 points at 4.2 mm Chamfer accuracy instead of 43024 at 4.5 mm.
 
 The synthetic acceptance is met on the host: 4.7 mm Chamfer accuracy and 6.7 mm completeness at
 Normal quality (16 views, scored over the four sides a ring can actually see, D048), and 100 images

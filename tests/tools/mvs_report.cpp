@@ -42,8 +42,14 @@ int main(int argc, char** argv) {
         views.push_back(input);
     }
 
+    // Optional fourth argument: the gradient floor the depth pass keeps (D053). Passing 0 turns it
+    // off, which is how its effect on the Chamfer distance is measured.
+    const int min_gradient =
+        argc > 4 ? std::atoi(argv[4]) : scand3d::mvs::PatchMatchOptions{}.min_reference_gradient;
+
     scand3d::mvs::MvsOptions options;
     options.working_width_px = working_width;
+    options.patch_match.min_reference_gradient = min_gradient;
     options.patch_match.min_depth_m = 0.6;
     options.patch_match.max_depth_m = 2.0;
     options.fusion.voxel_m = 0.004;

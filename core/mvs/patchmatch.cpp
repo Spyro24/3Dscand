@@ -6,6 +6,7 @@
 #include <random>
 #include <vector>
 
+#include "feature/edge_map.hpp"
 #include "geometry/linalg.hpp"
 #include "sfm/types.hpp"
 
@@ -325,6 +326,17 @@ DepthMap estimateDepth(
         const Hypothesis& plane = planes[index];
         if (!(plane.depth_m > 0.0) || !(plane.cost <= options.max_cost)) {
             continue;
+        }
+        // A flat reference patch has no photometric gradient to align, so its depth is whatever
+        // the cost happened to prefer: dropping it removes the smeared blobs a dense cloud
+        // otherwise grows over plain surfaces (D053).
+        if (options.min_reference_gradient > 0) {
+            const int x_px = static_cast<int>(index % static_cast<std::size_t>(width));
+            const int y_px = static_cast<int>(index / static_cast<std::size_t>(width));
+            if (feature::gradientMagnitudeAt(reference, x_px, y_px) <
+                options.min_reference_gradient) {
+                continue;
+            }
         }
         map.depth_m[index] = static_cast<float>(plane.depth_m);
         map.normal_camera[index * 3] = static_cast<float>(plane.normal[0]);

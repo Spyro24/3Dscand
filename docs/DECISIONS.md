@@ -764,3 +764,28 @@ here with its version, license and reason (agents.md sections 2 and 7).
 - **Consequence:** in dim light a still may blur if the phone moves during the longer exposure, so
   the multiplier is bounded at 100 ms. The warning is per capture, and it does not block saving:
   frames are still recorded, they simply tell the user the scan will not reconstruct.
+
+## D053 - an edge map feeds the dense pass, not the matcher
+
+- **Decision:** `feature::detectEdges` builds a Canny-style edge map (Sobel, non-maximum thinning,
+  hysteresis at 20/48 on a 0..255 magnitude scale, `feature::gradientMagnitudeAt` for single
+  pixels). The dense depth pass keeps a pixel only when the reference image has a Sobel magnitude
+  of at least 4 there (`PatchMatchOptions::min_reference_gradient`). Feature extraction can sample
+  keypoints along the contours (`FeatureParams::max_edge_points_per_level`, spacing, minimum
+  magnitude, only where a level is corner-poor), but that is off by default.
+- **Reason:** on a flat patch the photometric cost matches any depth, so a dense cloud grows smeared
+  blobs where there is no evidence at all. Sampling contours was meant to give the tracker support
+  on plain surfaces, where FAST only finds corners and an object outline has none.
+- **Verified:** replaying the brightest real scan (`tests/tools/tracking_report`, 8 map views) gives,
+  for corner-only features, 3 registered views / 101 points / 2 of 18 live frames tracked; with edge
+  points on every level 3 / 149 / 1; with edges kept away from corners 2 / 67 / 1; with level-0 edge
+  points only 2 / 29 / 0. On the textured fixture edge points lower verified match precision from
+  0.95 to 0.89 (all levels) and 0.92 (level 0), so they cannot be on by default. The dense floor is
+  measured by `tests/tools/mvs_report` (fourth argument: the floor) on the synthetic box at 8 views
+  and 320 px: 43024 fused points, 4.5 mm Chamfer accuracy, 17.9 mm symmetric without it; 38827
+  points, 4.2 mm and 17.7 mm with it. `tests/native/edge_test.cpp` covers the contour, the thinning,
+  a weak isolated speckle that hysteresis drops, the corner-poor case and determinism.
+- **Consequence:** the sparse map and the tracker keep exactly their old behaviour, and the dense
+  pass no longer reports depth where the image has nothing to align. Edges are available to a
+  matcher that can use their direction later; registration on real scans still stops after three or
+  four views, so that remains the blocker for the overlay, not feature support.
