@@ -17,6 +17,7 @@ import com.scand3d.capture.SessionStore
 import com.scand3d.core.bridge.NativeCore
 import com.scand3d.core.bridge.NativeOrientationMath
 import com.scand3d.debug.CaptureTestBridge
+import com.scand3d.reconstruct.LiveReconstruction
 import com.scand3d.reconstruct.ReconstructionRunner
 import com.scand3d.render.OverlayCameraParams
 import com.scand3d.render.OverlayFeed
@@ -64,12 +65,14 @@ class CaptureViewModel(application: Application) :
     private var controller: CameraCaptureController? = null
     private var recorder: ImuFrameAnnotator? = null
     private var benchmark: BenchmarkRecorder? = null
+    private var liveReconstruction: LiveReconstruction? = null
     private var savedFrameIndex = 0
     private var memoryTick = 0
     private var overlayHandle = 0L
     private var overlayPointCount = 0
     private var overlayDemo = false
     private var overlayReference: DoubleArray? = null
+    private var overlayBasis: DoubleArray? = null
     private var lastOverlayPublishMs = 0L
     private var lastDriftLogMs = 0L
 
@@ -165,6 +168,10 @@ class CaptureViewModel(application: Application) :
 
         val store = SessionStore(File(getApplication<Application>().filesDir, SESSIONS_DIRECTORY))
         benchmark = BenchmarkRecorder(getApplication(), Build.MODEL)
+        // The keyframes are reconstructed as they arrive, so the map on screen during the scan is
+        // this capture's own (roadmap 5.2) rather than something a debug command builds afterwards.
+        liveReconstruction?.close()
+        liveReconstruction = LiveReconstruction(on_cloud = ::applyReconstruction)
         savedFrameIndex = 0
         memoryTick = 0
         _state.value = _state.value.copy(
@@ -178,6 +185,8 @@ class CaptureViewModel(application: Application) :
     }
 
     override fun stopCapture() {
+        // Lets the worker place the last keyframes, so the cloud is the whole capture.
+        liveReconstruction?.finish()
         controller?.stopCapture()
         persistClockProfile()
         closeBenchmark()
@@ -268,18 +277,73 @@ class CaptureViewModel(application: Application) :
             return
         }
 
+        // Anchors the overlay pose on first use, which also gives the frame the cloud lives in.
+        val camera = overlayCameraParams() ?: run {
+            Log.w(LOG_TAG, "reconstruct: camera intrinsics unavailable")
+            return
+        }
+        // Only the first cloud fixes the frame: re-anchoring on every live update would make the
+        // cloud jump whenever the map grows.
+        val basis = overlayBasis ?: camera.rotation.also { overlayBasis = it }
+
         // Colours start white and are replaced by the keyframe sample below.
-        val colours = FloatArray(positions_m.size) { 1.0f }
-        if (!NativeCore.overlaySetPoints(handle, positions_m, colours)) {
+        val world = toOverlayFrame(positions_m, basis)
+        val colours = FloatArray(world.size) { 1.0f }
+        if (!NativeCore.overlaySetPoints(handle, world, colours)) {
             Log.w(LOG_TAG, "reconstruct: overlay rejected the cloud")
             return
         }
-        overlayPointCount = positions_m.size / 3
+        overlayPointCount = world.size / 3
         overlayDemo = true
-        overlayReference = fusedImu.latest()?.quaternion_wxyz?.toDoubleArray()
         Log.i(LOG_TAG, "reconstruct: ${overlayPointCount} points in the overlay")
         sampleKeyframeColors()
-        publishOverlay()
+        val vertices = publishOverlay()
+        Log.i(LOG_TAG, "reconstruct: $vertices of $overlayPointCount points project into the preview")
+    }
+
+    /**
+     * Reconstruction points are in the first camera's frame, whose +Z is forward. The overlay scene
+     * lives in the anchored body frame, where that same axis is body -Z (D031), so the cloud has to
+     * be rotated by the anchor camera pose before projection: without it every point sits behind
+     * the camera and the preview stays empty.
+     *
+     * The reconstruction's scale is free (D028) and a real capture measured 17.6 m across, so the
+     * rotation is followed by a rescale to [OVERLAY_CLOUD_MEDIAN_M]. Only the shape is meaningful.
+     */
+    private fun toOverlayFrame(positions_m: DoubleArray, camera_to_world: DoubleArray): DoubleArray {
+        val count = positions_m.size / 3
+        if (count == 0) {
+            return positions_m
+        }
+        val rotated = DoubleArray(positions_m.size)
+        val distances = DoubleArray(count)
+        for (index in 0 until count) {
+            val x = positions_m[index * 3]
+            val y = positions_m[index * 3 + 1]
+            val z = positions_m[index * 3 + 2]
+            val world_x = camera_to_world[0] * x + camera_to_world[1] * y + camera_to_world[2] * z
+            val world_y = camera_to_world[3] * x + camera_to_world[4] * y + camera_to_world[5] * z
+            val world_z = camera_to_world[6] * x + camera_to_world[7] * y + camera_to_world[8] * z
+            rotated[index * 3] = world_x
+            rotated[index * 3 + 1] = world_y
+            rotated[index * 3 + 2] = world_z
+            distances[index] = Math.sqrt(world_x * world_x + world_y * world_y + world_z * world_z)
+        }
+        distances.sort()
+        val median = distances[count / 2]
+        if (!median.isFinite() || median <= 0.0) {
+            return rotated
+        }
+        val scale = OVERLAY_CLOUD_MEDIAN_M / median
+        for (index in rotated.indices) {
+            rotated[index] *= scale
+        }
+        Log.i(
+            LOG_TAG,
+            "reconstruct: cloud median ${median.format(3)} m, " +
+                "scaled by ${scale.format(4)} for the overlay",
+        )
+        return rotated
     }
 
     /** Evenly spaced frames keep the baseline spread instead of clustering at the start. */
@@ -301,12 +365,12 @@ class CaptureViewModel(application: Application) :
     }
 
     /** Projects the scene on the live pose and hands the vertices to the renderer (5.1, 5.2). */
-    private fun publishOverlay() {
+    private fun publishOverlay(): Int {
         val handle = overlayHandle
         if (handle == 0L) {
-            return
+            return 0
         }
-        val camera = overlayCameraParams() ?: return
+        val camera = overlayCameraParams() ?: return 0
 
         val out = FloatArray(MAX_OVERLAY_VERTICES * NativeCore.OVERLAY_VERTEX_VALUE_COUNT)
         val count = NativeCore.overlayProject(
@@ -327,6 +391,7 @@ class CaptureViewModel(application: Application) :
         }
         OverlayFeed.publish(vertices)
         logOverlayDrift(vertices)
+        return count
     }
 
     /**
@@ -457,7 +522,9 @@ class CaptureViewModel(application: Application) :
             val angle = 2.0 * Math.PI * index / DEMO_POINT_COUNT
             positions[index * 3] = DEMO_RING_RADIUS_M * Math.cos(angle)
             positions[index * 3 + 1] = DEMO_RING_RADIUS_M * Math.sin(angle)
-            positions[index * 3 + 2] = DEMO_RING_DISTANCE_M
+            // The anchored body frame puts the camera's forward axis on -Z (D031), which is where
+            // the demo ring has to sit to be in front of the lens.
+            positions[index * 3 + 2] = -DEMO_RING_DISTANCE_M
             colours[index * 3] = (0.5 + 0.5 * Math.cos(angle)).toFloat()
             colours[index * 3 + 1] = (0.5 + 0.5 * Math.cos(angle - 2.0 * Math.PI / 3.0)).toFloat()
             colours[index * 3 + 2] = (0.5 + 0.5 * Math.cos(angle - 4.0 * Math.PI / 3.0)).toFloat()
@@ -470,6 +537,7 @@ class CaptureViewModel(application: Application) :
             NativeCore.overlayDestroy(overlayHandle)
             overlayHandle = 0L
         }
+        overlayBasis = null
         overlayPointCount = 0
     }
 
@@ -514,6 +582,22 @@ class CaptureViewModel(application: Application) :
             savedFrames = savedFrameCount,
             keyframe_candidates = recorder?.keyframeCandidates() ?: _state.value.keyframe_candidates,
         )
+
+        // Keyframes are the frames the scan can actually register, so they feed the map while the
+        // capture runs. The camera parameters follow the preview, and the worker scales them to
+        // the decoded keyframe size.
+        val path = frame.relative_path
+        if (frame.keyframe_candidate && path != null) {
+            val camera = overlayCameraParams()
+            if (camera == null) {
+                Log.w(LOG_TAG, "keyframe $path skipped: camera intrinsics unavailable")
+            } else {
+                liveReconstruction?.onKeyframe(
+                    File(getApplication<Application>().filesDir, path),
+                    camera,
+                )
+            }
+        }
     }
 
     override fun onCameraLost(reason: String) {
@@ -589,6 +673,8 @@ class CaptureViewModel(application: Application) :
     private fun releaseController() {
         controller?.release()
         controller = null
+        liveReconstruction?.close()
+        liveReconstruction = null
     }
 
     private fun closeBenchmark() {
@@ -603,6 +689,7 @@ class CaptureViewModel(application: Application) :
         const val SENSOR_RATE_HZ = 200.0
         const val MEMORY_SAMPLE_EVERY = 10
         const val MAX_OVERLAY_VERTICES = 2048
+        const val OVERLAY_CLOUD_MEDIAN_M = 0.55
         const val MAX_RECONSTRUCTION_FRAMES = 12
         const val DEMO_POINT_COUNT = 64
         const val DEMO_RING_RADIUS_M = 0.18

@@ -159,6 +159,13 @@ matches: the map from a box face is coplanar, and the six-point PnP DLT is degen
 points, so the next view cannot be placed. Planar PnP is the open piece before the loop can be
 measured on a whole scan.
 
+Reconstruction now runs during the capture itself rather than on a finished session: every keyframe
+the camera writes is decoded and added to a live session, which re-runs the sparse map on a worker
+at most every 1.5 s and redraws the overlay from it (D039). A 22 s capture on the SM-G930F reached
+eight views at 0.6-3 s per update, and all of its points projected into the preview. The view cap is
+eight because every update re-matches every pair; a full scan needs the pair cache that turns the
+loop incremental.
+
 5.3 is implemented natively: `overlay::samplePointColors` takes the per-channel median of a 3x3
 keyframe patch around each point's projection, and `KeyframeColorSampler` decodes the newest saved
 JPEG, packs it to RGB and calls it through the bridge (D033). Six gtest cases cover it. With no

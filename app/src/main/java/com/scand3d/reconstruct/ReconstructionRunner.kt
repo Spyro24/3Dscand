@@ -1,7 +1,5 @@
 package com.scand3d.reconstruct
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.util.Log
 import com.scand3d.core.bridge.NativeCore
 import com.scand3d.render.OverlayCameraParams
@@ -28,7 +26,7 @@ class ReconstructionRunner {
     fun run(
         frames: List<File>,
         camera: OverlayCameraParams,
-        max_edge_px: Int = GRAY_MAX_EDGE_PX,
+        max_edge_px: Int = GrayDecoder.GRAY_MAX_EDGE_PX,
     ): Outcome {
         val handle = NativeCore.reconstructionCreate()
         if (handle == 0L) {
@@ -38,7 +36,7 @@ class ReconstructionRunner {
         try {
             var added = 0
             for (file in frames) {
-                val gray = decodeGray(file, max_edge_px) ?: continue
+                val gray = GrayDecoder.decode(file, max_edge_px) ?: continue
                 // The keyframe is decoded smaller than the preview, so the intrinsics follow it.
                 val scaled = camera.scaledTo(gray.width_px, gray.height_px)
                 val index = NativeCore.reconstructionAddView(
@@ -78,59 +76,7 @@ class ReconstructionRunner {
         }
     }
 
-    private class Gray(val width_px: Int, val height_px: Int, val pixels: ByteArray)
-
-    private fun decodeGray(file: File, max_edge_px: Int): Gray? {
-        return try {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(file.absolutePath, bounds)
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-                null
-            } else {
-                var sample = 1
-                val long_edge = maxOf(bounds.outWidth, bounds.outHeight)
-                while (long_edge / (sample * 2) >= max_edge_px) {
-                    sample *= 2
-                }
-                val bitmap = BitmapFactory.decodeFile(
-                    file.absolutePath,
-                    BitmapFactory.Options().apply { inSampleSize = sample },
-                )
-                if (bitmap == null) {
-                    null
-                } else {
-                    try {
-                        toGray(bitmap)
-                    } finally {
-                        bitmap.recycle()
-                    }
-                }
-            }
-        } catch (t: Throwable) {
-            Log.w(LOG_TAG, "could not decode ${file.name}", t)
-            null
-        }
-    }
-
-    private fun toGray(bitmap: Bitmap): Gray {
-        val width = bitmap.width
-        val height = bitmap.height
-        val pixels = IntArray(width * height)
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-        val gray = ByteArray(width * height)
-        for (index in pixels.indices) {
-            val colour = pixels[index]
-            val red = (colour shr 16) and 0xFF
-            val green = (colour shr 8) and 0xFF
-            val blue = colour and 0xFF
-            // Integer luma in the same 0.299/0.587/0.114 proportions the preview shader uses.
-            gray[index] = ((red * 77 + green * 150 + blue * 29) shr 8).toByte()
-        }
-        return Gray(width, height, gray)
-    }
-
     private companion object {
         const val LOG_TAG = "Reconstruction"
-        const val GRAY_MAX_EDGE_PX = 480
     }
 }

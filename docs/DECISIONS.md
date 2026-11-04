@@ -484,3 +484,21 @@ here with its version, license and reason (agents.md sections 2 and 7).
   reports no valid pose even with 96 mapped correspondences and the next view is rejected. Planar
   PnP (homography decomposition, or a plane-aware DLT) is the next piece; until it exists the loop
   cannot be measured on a whole scan, and the overlay keeps drawing the debug cloud.
+
+### D039 - Reconstruct during the capture, and display the cloud in the anchored frame
+- **Decision:** `LiveReconstruction` owns one native session for the whole capture. Each IMU
+  keyframe is queued from the frame-writer thread, decoded to 480 px gray on a single worker, added
+  to that session, and the map is re-run at most every 1.5 s. The newest points replace the overlay
+  scene. Before projection the cloud is rotated by the anchor camera rotation and rescaled so its
+  median distance is 0.55 m. The debug `reconstruct` command stays as the saved-session path.
+- **Reason:** reconstruction only ran on a finished session through a debug broadcast, so the scan
+  showed nothing while it was being recorded. On device that loop also exposed two display bugs: the
+  cloud's median extent was 17.6 m (the reconstruction scale is free, D028) and every point had
+  negative depth, because reconstruction points are in the first camera's +Z-forward frame while the
+  overlay scene is anchored in the body frame where that axis is -Z (D031). The demo ring had the
+  same sign error, so the render path had never actually drawn a point.
+- **Consequence:** a 22 s capture on the SM-G930F grows to eight views and eight points at 0.6-3 s
+  per update, and every point projects into the preview (`8 of 8`). The view cap is eight because
+  each update re-matches every pair (12 views cost 14 s), so the loop is not yet incremental; a pair
+  cache in the session is the next step. Map growth on a real scene still stops where D038 says,
+  coplanar PnP, which is why the point counts are small.

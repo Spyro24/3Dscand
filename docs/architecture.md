@@ -219,6 +219,12 @@ neighbouring pair (~16 geometric matches), so the overlay still draws the debug 
 296 of 310 matches and the map reaches three views and 114 points before PnP refuses: the map is a
 box face, and the six-point DLT cannot solve a coplanar point set (D038).
 
+The app feeds the same session while the capture runs: each keyframe the camera writes is decoded to
+480 px gray and added to one live session, a worker re-runs the map at most every 1.5 s, and the
+resulting points replace the overlay scene (D039). The cloud arrives in the reconstruction's first
+camera frame, so it is rotated by the anchor camera pose and rescaled before projection; without
+that rotation every point has negative depth and nothing is drawn.
+
 ## Current phase status
 
 - Phase 0 complete: project, native bridge, local test harnesses, synthetic scenes, benchmarks,
