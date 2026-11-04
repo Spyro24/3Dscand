@@ -2,6 +2,8 @@ package com.scand3d.capture
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
@@ -23,6 +25,7 @@ import android.util.Log
 import android.util.Range
 import android.util.Size
 import android.view.Surface
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -89,6 +92,9 @@ class CameraCaptureController(
     private val capturing = AtomicBoolean(false)
     private var sessionStore: SessionStore? = null
     private val savedFrames = AtomicInteger(0)
+
+    /** Stills that were captured but not worth a file since the last stored frame (D050). */
+    private var stillsSinceKept = 0
 
     // JPEG writes run here so a 3 MB write never stalls the camera callbacks.
     private val fileWriter = Executors.newSingleThreadExecutor { runnable ->
@@ -256,6 +262,7 @@ class CameraCaptureController(
         handler?.post {
             sessionStore = store
             savedFrames.set(0)
+            stillsSinceKept = 0
             capturing.set(true)
             captureStill()
         }
@@ -574,28 +581,50 @@ class CameraCaptureController(
         }
 
         pendingStill = null
-        val index = savedFrames.incrementAndGet()
 
-        // The write happens off the camera thread: at ~3 MB per frame, doing it inline dropped
-        // the preview to a few frames per second while a burst was running.
-        fileWriter.execute {
-            try {
+        // Deciding, downscaling and writing run off the camera thread: done inline they dropped the
+        // preview to a few frames per second while a burst was running.
+        fileWriter.execute { persistStill(bytes, metadata, timestamp) }
+    }
+
+    /**
+     * Runs on the frame writer: annotate the still, decide whether it is worth disk, store it, then
+     * ask for the next one. Only keyframes are stored (D050); the other stills cost about 3 MB each
+     * at full resolution and no later stage ever reads them.
+     */
+    private fun persistStill(bytes: ByteArray, metadata: FrameRecord?, timestamp: Long) {
+        val store = sessionStore ?: return
+        try {
+            val record = FrameRecord(
+                timestamp_ns = if (timestamp > 0) timestamp else (metadata?.timestamp_ns ?: 0L),
+                exposure_ns = metadata?.exposure_ns ?: 0L,
+                iso = metadata?.iso ?: 0,
+                focus_diopter = metadata?.focus_diopter ?: 0f,
+                relative_path = null,
+            )
+            // The recorder adds orientation, the measured clock residual and the keyframe prior;
+            // without a sensor layer the frame is stored exactly as captured. Every still goes
+            // through it, so a skipped frame leaves the prior on the same rotation reference.
+            val annotated = recorder?.annotate(record) ?: record
+            val keep = SessionStoragePolicy.shouldKeep(
+                has_keyframe_prior = recorder != null,
+                keyframe_candidate = annotated.keyframe_candidate,
+                stills_since_kept = stillsSinceKept,
+                kept = savedFrames.get(),
+            )
+
+            if (!keep) {
+                stillsSinceKept += 1
+            } else {
+                val index = savedFrames.incrementAndGet()
+                stillsSinceKept = 0
                 val file = store.frameFile(index)
-                file.writeBytes(bytes)
-                writeExif(file, metadata, timestamp)
+                file.writeBytes(encodedForStorage(bytes))
+                writeExif(file, annotated, timestamp)
 
-                val record = FrameRecord(
-                    timestamp_ns = if (timestamp > 0) timestamp else (metadata?.timestamp_ns ?: 0L),
-                    exposure_ns = metadata?.exposure_ns ?: 0L,
-                    iso = metadata?.iso ?: 0,
-                    focus_diopter = metadata?.focus_diopter ?: 0f,
-                    relative_path = store.frameRelativePath(index),
-                )
-                // The recorder adds orientation, the measured clock residual and the keyframe
-                // prior; without a sensor layer the frame is stored exactly as captured.
-                val annotated = recorder?.annotate(record) ?: record
-                store.appendFrame(annotated)
-                listener.onFrameSaved(index, annotated)
+                val stored = annotated.copy(relative_path = store.frameRelativePath(index))
+                store.appendFrame(stored)
+                listener.onFrameSaved(index, stored)
                 if (index % 10 == 0) {
                     Log.i(LOG_TAG, "saved frame $index")
                 }
@@ -608,15 +637,58 @@ class CameraCaptureController(
                 if (!capturing.get()) {
                     flushManifest(shutdownWriter = false)
                 }
-
-                if (capturing.get()) {
-                    // Serialise captures: the next request waits until this frame is on disk.
-                    handler?.postDelayed({ if (capturing.get()) captureStill() }, NEXT_CAPTURE_DELAY_MS)
-                }
-            } catch (t: Throwable) {
-                Log.e(LOG_TAG, "saving frame failed", t)
-                listener.onFailure(t.message ?: "saving frame failed")
             }
+
+            if (!capturing.get()) {
+                return
+            }
+            if (savedFrames.get() >= SessionStoragePolicy.MAX_FRAMES) {
+                // The scan holds a full set of keyframes; the preview stays up until the user stops.
+                Log.i(LOG_TAG, "session holds ${savedFrames.get()} frames, no further stills")
+                return
+            }
+            // Serialise captures: the next request waits until this frame is decided.
+            handler?.postDelayed({ if (capturing.get()) captureStill() }, NEXT_CAPTURE_DELAY_MS)
+        } catch (t: Throwable) {
+            Log.e(LOG_TAG, "saving frame failed", t)
+            listener.onFailure(t.message ?: "saving frame failed")
+        }
+    }
+
+    /**
+     * Re-encodes a still for storage. The camera writes full-resolution JPEGs and the pipeline
+     * decodes them at 480 px or less, so pixels past 1600 px on the long edge are disk cost only
+     * (D050). Returns the original bytes when the JPEG cannot be read, rather than dropping a frame.
+     */
+    private fun encodedForStorage(bytes: ByteArray): ByteArray {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            return bytes
+        }
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = SessionStoragePolicy.sampleSize(maxOf(bounds.outWidth, bounds.outHeight))
+        }
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return bytes
+        return try {
+            val (width, height) = SessionStoragePolicy.scaledSize(decoded.width, decoded.height)
+            val scaled = if (width == decoded.width && height == decoded.height) {
+                decoded
+            } else {
+                Bitmap.createScaledBitmap(decoded, width, height, true)
+            }
+            try {
+                ByteArrayOutputStream(bytes.size / 8).use { out ->
+                    scaled.compress(Bitmap.CompressFormat.JPEG, SessionStoragePolicy.JPEG_QUALITY, out)
+                    out.toByteArray()
+                }
+            } finally {
+                if (scaled !== decoded) {
+                    scaled.recycle()
+                }
+            }
+        } finally {
+            decoded.recycle()
         }
     }
 

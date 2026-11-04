@@ -700,3 +700,24 @@ here with its version, license and reason (agents.md sections 2 and 7).
   keyframes and 480 px for now, the streamed `cloud.ply` keeps the sparse map (the Blender add-on
   reads that file as the live map), and the dense cloud is single-colour until the app-side sampler
   colours it from a keyframe.
+
+## D050 - a scan stores only keyframes, downscaled, capped at 150 frames
+
+- **Decision:** the capture path writes a JPEG only for an IMU keyframe candidate (or for a still
+  that waited 40 frames for one, so a dead gyro cannot stop a scan), downscales it so the long edge
+  is at most 1600 px, re-encodes it at quality 90, and stops adding frames once a session holds 150.
+  `SessionStoragePolicy` owns the numbers; `CameraCaptureController` applies them on the frame
+  writer thread.
+- **Reason:** every still was written at full resolution, about 3 MB each, at one still every
+  120 ms. A 20 minute recording therefore wrote several GB and filled the phone. Every consumer (the
+  live map, `ReconstructionRunner`, the dense pass, `KeyframeColorSampler`) reads only keyframe
+  JPEGs, and the pipeline decodes at 480 px or less, so the other frames and the other pixels were
+  paid for and never read. 1600 px is the long edge the quality gate names (agents.md section 6).
+- **Verified:** `SessionStoragePolicyTest` covers the keep rule, the fallback cadence, the frame cap
+  and the downscale arithmetic (4032x3024 decodes at 2x and is stored as 1600x1200). The app builds,
+  its JVM tests pass and the change is installed on the SM-G930F; the measured size of a capture is
+  recorded in `docs/benchmarks/phase1-storage-budget.md`.
+- **Consequence:** a scan is bounded at 150 frames, roughly 40-60 MB instead of several GB, and the
+  capture loop stops taking stills at the cap while the preview keeps running until the user stops.
+  Nothing is deleted: old sessions stay until the user removes them (agents.md section 8), so disk
+  use still grows by one bounded session per scan.
