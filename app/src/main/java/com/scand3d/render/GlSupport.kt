@@ -9,6 +9,12 @@ import java.nio.FloatBuffer
 /** Small helpers shared by the preview renderer. */
 internal object GlBuffers {
 
+    /** Direct buffer of `capacity` floats, used for data that is re-uploaded every frame. */
+    fun sizedFloatBuffer(capacity: Int): FloatBuffer =
+        ByteBuffer.allocateDirect(capacity * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+
     fun floatBuffer(values: FloatArray): FloatBuffer =
         ByteBuffer.allocateDirect(values.size * 4)
             .order(ByteOrder.nativeOrder())

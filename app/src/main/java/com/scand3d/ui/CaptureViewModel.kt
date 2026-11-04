@@ -11,8 +11,10 @@ import com.scand3d.capture.CameraCaptureController
 import com.scand3d.capture.FrameRecord
 import com.scand3d.capture.LockedCaptureSettings
 import com.scand3d.capture.SessionStore
+import com.scand3d.core.bridge.NativeCore
 import com.scand3d.core.bridge.NativeOrientationMath
 import com.scand3d.debug.CaptureTestBridge
+import com.scand3d.render.OverlayFeed
 import com.scand3d.sensors.AndroidImuSource
 import com.scand3d.sensors.AngularRateMonitor
 import com.scand3d.sensors.DeviceClockProfile
@@ -58,6 +60,9 @@ class CaptureViewModel(application: Application) :
     private var benchmark: BenchmarkRecorder? = null
     private var savedFrameIndex = 0
     private var memoryTick = 0
+    private var overlayHandle = 0L
+    private var overlayPointCount = 0
+    private var overlayDemo = false
 
     init {
         CaptureTestBridge.actions = this
@@ -124,6 +129,9 @@ class CaptureViewModel(application: Application) :
         Log.i(LOG_TAG, "preview surface ready, starting camera")
         controller.start(Surface(texture))
         _state.value = _state.value.copy(phase = CapturePhase.Preview, message = null)
+        if (overlayDemo) {
+            publishOverlay()
+        }
     }
 
     fun toggleCapture() {
@@ -171,6 +179,91 @@ class CaptureViewModel(application: Application) :
     }
 
     override fun savedFrames(): Int = _state.value.savedFrames
+
+    override fun setOverlayDemo(enabled: Boolean) {
+        overlayDemo = enabled
+        if (!enabled) {
+            releaseOverlay()
+            OverlayFeed.publish(FloatArray(0))
+            return
+        }
+        if (overlayHandle == 0L) {
+            val handle = NativeCore.overlayCreate()
+            if (handle == 0L) {
+                Log.w(LOG_TAG, "overlay scene unavailable, native core not loaded")
+                return
+            }
+            overlayHandle = handle
+            val (positions, colours) = demoCloud()
+            if (!NativeCore.overlaySetPoints(handle, positions, colours)) {
+                Log.w(LOG_TAG, "overlay points rejected by the native scene")
+            }
+            overlayPointCount = positions.size / 3
+            Log.i(LOG_TAG, "overlay demo scene: $overlayPointCount points")
+        }
+        publishOverlay()
+    }
+
+    /** Projects the current scene and hands the vertices to the GL renderer (roadmap 5.1). */
+    private fun publishOverlay() {
+        val handle = overlayHandle
+        if (handle == 0L) {
+            return
+        }
+        val width = _state.value.previewWidthPx
+        val height = _state.value.previewHeightPx
+        if (width <= 0 || height <= 0) {
+            return
+        }
+
+        // STUB: placeholder intrinsics and an identity pose. Roadmap 5.2 replaces both with the
+        // camera model and the tracked pose; until then this only proves the render path.
+        val out = FloatArray(MAX_OVERLAY_VERTICES * NativeCore.OVERLAY_VERTEX_VALUE_COUNT)
+        val count = NativeCore.overlayProject(
+            handle,
+            IDENTITY_ROTATION,
+            ZERO_CENTRE_M,
+            DEMO_FOCAL_FRACTION * width,
+            width / 2.0,
+            height / 2.0,
+            width,
+            height,
+            out,
+        )
+        val vertices = if (count > 0) {
+            out.copyOf(count * NativeCore.OVERLAY_VERTEX_VALUE_COUNT)
+        } else {
+            FloatArray(0)
+        }
+        OverlayFeed.publish(vertices)
+        Log.i(LOG_TAG, "overlay published $count of $overlayPointCount points")
+    }
+
+    // STUB: Phase 4 output is not wired into the app yet (D030), so the render path is verified
+    // with a canned ring of points one meter in front of the camera. It is only drawn when the
+    // debug receiver asks for it, never during a real scan.
+    private fun demoCloud(): Pair<DoubleArray, FloatArray> {
+        val positions = DoubleArray(DEMO_POINT_COUNT * 3)
+        val colours = FloatArray(DEMO_POINT_COUNT * 3)
+        for (index in 0 until DEMO_POINT_COUNT) {
+            val angle = 2.0 * Math.PI * index / DEMO_POINT_COUNT
+            positions[index * 3] = DEMO_RING_RADIUS_M * Math.cos(angle)
+            positions[index * 3 + 1] = DEMO_RING_RADIUS_M * Math.sin(angle)
+            positions[index * 3 + 2] = DEMO_RING_DISTANCE_M
+            colours[index * 3] = (0.5 + 0.5 * Math.cos(angle)).toFloat()
+            colours[index * 3 + 1] = (0.5 + 0.5 * Math.cos(angle - 2.0 * Math.PI / 3.0)).toFloat()
+            colours[index * 3 + 2] = (0.5 + 0.5 * Math.cos(angle - 4.0 * Math.PI / 3.0)).toFloat()
+        }
+        return positions to colours
+    }
+
+    private fun releaseOverlay() {
+        if (overlayHandle != 0L) {
+            NativeCore.overlayDestroy(overlayHandle)
+            overlayHandle = 0L
+        }
+        overlayPointCount = 0
+    }
 
     fun retry() {
         // Logged with its caller so a retry nobody asked for is traceable.
@@ -236,6 +329,7 @@ class CaptureViewModel(application: Application) :
         }
         releaseController()
         closeBenchmark()
+        releaseOverlay()
         fusedImu.close()
         recorder = null
     }
@@ -290,5 +384,12 @@ class CaptureViewModel(application: Application) :
         const val DEVICES_DIRECTORY = "devices"
         const val SENSOR_RATE_HZ = 200.0
         const val MEMORY_SAMPLE_EVERY = 10
+        const val MAX_OVERLAY_VERTICES = 2048
+        const val DEMO_POINT_COUNT = 64
+        const val DEMO_RING_RADIUS_M = 0.18
+        const val DEMO_RING_DISTANCE_M = 1.0
+        const val DEMO_FOCAL_FRACTION = 0.9
+        val IDENTITY_ROTATION = doubleArrayOf(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+        val ZERO_CENTRE_M = doubleArrayOf(0.0, 0.0, 0.0)
     }
 }

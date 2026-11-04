@@ -5,6 +5,7 @@ import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.util.Log
+import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
@@ -37,6 +38,15 @@ class MonochromePreviewRenderer(
     private var viewportHeightPx = 1
     private var requestRender: (() -> Unit)? = null
 
+    private var pointsProgram = 0
+    private var pointPositionHandle = 0
+    private var pointColorHandle = 0
+    private var pointOpacityHandle = 0
+    private var pointSizeHandle = 0
+    private var overlayBuffer: FloatBuffer? = null
+    private var overlayVertexCount = 0
+    private var pendingOverlay: FloatArray? = null
+
     /** The GLSurfaceView installs its redraw request here so frames are drawn when they arrive. */
     fun bindRequestRender(block: () -> Unit) {
         requestRender = block
@@ -64,6 +74,16 @@ class MonochromePreviewRenderer(
         surfaceTexture = texture
         onSurfaceTextureReady(texture)
         Log.i(LOG_TAG, "preview texture ready ${textureWidthPx}x$textureHeightPx")
+
+        // Sparse colour overlay (roadmap 5.1): a separate program drawn into the same letterboxed
+        // rectangle as the camera image, so projected NDC lines up with the image one to one.
+        pointsProgram = GlShaders.createProgram(POINT_VERTEX_SHADER, POINT_FRAGMENT_SHADER)
+        pointPositionHandle = GLES20.glGetAttribLocation(pointsProgram, "aPosition")
+        pointColorHandle = GLES20.glGetAttribLocation(pointsProgram, "aColor")
+        pointOpacityHandle = GLES20.glGetUniformLocation(pointsProgram, "uOpacity")
+        pointSizeHandle = GLES20.glGetUniformLocation(pointsProgram, "uPointSize")
+        // Replays the last published scene into a renderer that was just rebuilt.
+        OverlayFeed.bind(::submitOverlay)
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -112,6 +132,68 @@ class MonochromePreviewRenderer(
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         GLES20.glDisableVertexAttribArray(positionHandle)
         GLES20.glDisableVertexAttribArray(texCoordHandle)
+
+        drawOverlay()
+    }
+
+    /**
+     * Takes a projected scene from any thread: {x_ndc, y_ndc, r, g, b} per point, far to near.
+     * An empty array clears the overlay.
+     */
+    fun submitOverlay(vertices: FloatArray) {
+        synchronized(this) { pendingOverlay = vertices }
+        requestRender?.invoke()
+    }
+
+    private fun drawOverlay() {
+        val incoming = synchronized(this) {
+            val pending = pendingOverlay
+            pendingOverlay = null
+            pending
+        }
+        if (incoming != null) {
+            val buffer = overlayBuffer?.takeIf { it.capacity() >= incoming.size }
+                ?: GlBuffers.sizedFloatBuffer(incoming.size).also { overlayBuffer = it }
+            buffer.clear()
+            buffer.put(incoming)
+            buffer.position(0)
+            overlayVertexCount = incoming.size / OVERLAY_VERTEX_FLOATS
+        }
+        val buffer = overlayBuffer
+        if (overlayVertexCount == 0 || pointsProgram == 0 || buffer == null) {
+            return
+        }
+
+        GLES20.glUseProgram(pointsProgram)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glUniform1f(pointOpacityHandle, OVERLAY_OPACITY)
+        GLES20.glUniform1f(pointSizeHandle, OVERLAY_POINT_SIZE_PX)
+
+        GLES20.glEnableVertexAttribArray(pointPositionHandle)
+        GLES20.glVertexAttribPointer(
+            pointPositionHandle,
+            2,
+            GLES20.GL_FLOAT,
+            false,
+            OVERLAY_STRIDE_BYTES,
+            buffer,
+        )
+        buffer.position(2)
+        GLES20.glEnableVertexAttribArray(pointColorHandle)
+        GLES20.glVertexAttribPointer(
+            pointColorHandle,
+            3,
+            GLES20.GL_FLOAT,
+            false,
+            OVERLAY_STRIDE_BYTES,
+            buffer,
+        )
+        buffer.position(0)
+        GLES20.glDrawArrays(GLES20.GL_POINTS, 0, overlayVertexCount)
+        GLES20.glDisableVertexAttribArray(pointPositionHandle)
+        GLES20.glDisableVertexAttribArray(pointColorHandle)
+        GLES20.glDisable(GLES20.GL_BLEND)
     }
 
     override fun onFrameAvailable(surfaceTexture: SurfaceTexture?) {
@@ -121,6 +203,10 @@ class MonochromePreviewRenderer(
 
     private companion object {
         const val LOG_TAG = "MonochromePreview"
+        const val OVERLAY_VERTEX_FLOATS = 5
+        const val OVERLAY_STRIDE_BYTES = OVERLAY_VERTEX_FLOATS * 4
+        const val OVERLAY_OPACITY = 1.0f
+        const val OVERLAY_POINT_SIZE_PX = 6.0f
 
         // Luminance from the sensor's RGB, then a single grey channel: no colour reaches the screen.
         const val FRAGMENT_SHADER = """
@@ -143,6 +229,29 @@ class MonochromePreviewRenderer(
             void main() {
                 gl_Position = aPosition;
                 vTexCoord = (uTexMatrix * aTexCoord).xy;
+            }
+        """
+
+        // Point sprites: the vertex stage receives NDC computed by the native overlay projection,
+        // so this shader only sizes and colours a point.
+        const val POINT_VERTEX_SHADER = """
+            attribute vec2 aPosition;
+            attribute vec3 aColor;
+            uniform float uPointSize;
+            varying vec3 vColor;
+            void main() {
+                gl_Position = vec4(aPosition, 0.0, 1.0);
+                gl_PointSize = uPointSize;
+                vColor = aColor;
+            }
+        """
+
+        const val POINT_FRAGMENT_SHADER = """
+            precision mediump float;
+            uniform float uOpacity;
+            varying vec3 vColor;
+            void main() {
+                gl_FragColor = vec4(vColor, uOpacity);
             }
         """
     }

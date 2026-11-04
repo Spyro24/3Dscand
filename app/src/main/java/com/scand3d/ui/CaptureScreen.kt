@@ -39,6 +39,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.scand3d.R
 import com.scand3d.render.MonochromePreviewRenderer
+import com.scand3d.render.OverlayFeed
 import com.scand3d.sensors.ImuMode
 import com.scand3d.sensors.MotionWarning
 
@@ -132,6 +133,8 @@ private fun CameraPreview(
                 renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
             }
         },
+        // The renderer is rebuilt with the view; stop feeding the old one.
+        onRelease = { OverlayFeed.bind(null) },
     )
 }
 

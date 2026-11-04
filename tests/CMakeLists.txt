@@ -34,6 +34,7 @@ add_library(scand3d_test_util STATIC
     "${SCAND3D_CORE_DIR}/feature/matcher.cpp"
     "${SCAND3D_CORE_DIR}/geometry/linalg.cpp"
     "${SCAND3D_CORE_DIR}/geometry/two_view.cpp"
+    "${SCAND3D_CORE_DIR}/overlay/overlay_scene.cpp"
     "${SCAND3D_CORE_DIR}/sensors/keyframe_prior.cpp"
     "${SCAND3D_CORE_DIR}/sensors/mahony_filter.cpp"
     "${SCAND3D_CORE_DIR}/sensors/tilt_orientation.cpp"
@@ -104,6 +105,12 @@ add_executable(sfm_report
     tools/sfm_report.cpp
 )
 target_link_libraries(sfm_report PRIVATE scand3d_test_util)
+
+add_executable(overlay_test
+    native/overlay_test.cpp
+)
+target_link_libraries(overlay_test PRIVATE scand3d_test_util GTest::gtest_main)
+gtest_discover_tests(overlay_test)
 
 add_executable(synthetic_scene_test
     native/synthetic_scene_test.cpp

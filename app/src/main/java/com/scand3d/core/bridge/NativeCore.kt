@@ -71,6 +71,52 @@ object NativeCore {
                 max_baseline_rad,
             )
 
+    /** Floats per overlay vertex: {x_ndc, y_ndc, r, g, b}; mirrors kOverlayVertexValueCount. */
+    const val OVERLAY_VERTEX_VALUE_COUNT = 5
+
+    /** Opens an empty overlay scene; 0 when the native core is unavailable. */
+    fun overlayCreate(): Long = if (isLoaded) nativeOverlayCreate() else 0L
+
+    fun overlayDestroy(handle: Long) {
+        if (isLoaded && handle != 0L) nativeOverlayDestroy(handle)
+    }
+
+    /** Replaces the scene: xyz per point in meters, then 0..1 rgb per point. */
+    fun overlaySetPoints(handle: Long, positions_m: DoubleArray, rgb: FloatArray): Boolean =
+        isLoaded &&
+            handle != 0L &&
+            positions_m.size % 3 == 0 &&
+            rgb.size == positions_m.size &&
+            nativeOverlaySetPoints(handle, positions_m, rgb)
+
+    /** Writes visible vertices into `out` (multiples of [OVERLAY_VERTEX_VALUE_COUNT]). */
+    fun overlayProject(
+        handle: Long,
+        rotation: DoubleArray,
+        centre_m: DoubleArray,
+        focal_px: Double,
+        cx_px: Double,
+        cy_px: Double,
+        image_width_px: Int,
+        image_height_px: Int,
+        out: FloatArray,
+    ): Int =
+        if (isLoaded && handle != 0L && rotation.size == 9 && centre_m.size == 3) {
+            nativeOverlayProject(
+                handle,
+                rotation,
+                centre_m,
+                focal_px,
+                cx_px,
+                cy_px,
+                image_width_px,
+                image_height_px,
+                out,
+            )
+        } else {
+            0
+        }
+
     private external fun nativeCoreVersion(): String
 
     private external fun nativeImuCreate(sample_rate_hz: Double): Long
@@ -91,4 +137,26 @@ object NativeCore {
         min_baseline_rad: Double,
         max_baseline_rad: Double,
     ): Boolean
+
+    private external fun nativeOverlayCreate(): Long
+
+    private external fun nativeOverlayDestroy(handle: Long)
+
+    private external fun nativeOverlaySetPoints(
+        handle: Long,
+        positions_m: DoubleArray,
+        rgb: FloatArray,
+    ): Boolean
+
+    private external fun nativeOverlayProject(
+        handle: Long,
+        rotation: DoubleArray,
+        centre_m: DoubleArray,
+        focal_px: Double,
+        cx_px: Double,
+        cy_px: Double,
+        image_width_px: Int,
+        image_height_px: Int,
+        out: FloatArray,
+    ): Int
 }

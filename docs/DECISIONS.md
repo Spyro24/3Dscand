@@ -353,3 +353,23 @@ here with its version, license and reason (agents.md sections 2 and 7).
 - **Consequence:** Phase 5 (live overlay) can consume this module, but the bridge still exposes only
   the Phase 2 handle API. Wiring capture -> features -> matches -> reconstruction is the next piece
   of work, and the 90 percent real-scan measurement depends on it.
+
+### D031 - Overlay camera contract: displayed-preview pixels, one rectangle, no depth buffer
+- **Decision:** `core/overlay` projects reconstructed points through a pinhole camera whose
+  intrinsics are expressed in *displayed preview image pixels* (origin top-left, +x right, +y
+  down) and whose pose is camera-to-world, matching `core/sfm` (D012, D028). It returns NDC, and
+  the renderer draws the points into the same letterboxed rectangle it draws the camera image
+  into, so image pixels and NDC line up one to one at any surface shape.
+- **Reason:** the preview is letterboxed by aspect fit. Computing that rectangle twice, once for
+  the background and once for the overlay, is exactly how a point cloud ends up a few pixels off
+  when the view size changes. One rectangle, one mapping, and the projection stays a pure function
+  that host tests can check.
+- **Ordering:** vertices are sorted far to near in C++ and drawn with blending and no depth
+  buffer. A sparse overlay does not justify a depth attachment on a surface that already carries
+  the camera texture, and painter order is exact for point sprites.
+- **Gauge:** points and poses come from Phase 4, where the first camera fixes the frame and the
+  global scale is free, so the overlay is defined up to that similarity until the capture pipeline
+  pins a metric scale. The overlay therefore cannot claim a physical size yet.
+- **Consequence:** the app has no reconstruction output yet (D030), so roadmap 5.1 is verified with
+  a debug-only canned cloud behind the debug receiver, marked `// STUB` in the code and in
+  `roadmap.md`. It stays `[~]` until it draws real points.

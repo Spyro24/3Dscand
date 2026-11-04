@@ -44,4 +44,47 @@ bool keyframeBaselineAccept(
     double min_baseline_rad,
     double max_baseline_rad);
 
+/// Opaque handle to one overlay scene. 0 is never a valid handle.
+using OverlayHandle = std::uint64_t;
+
+/// Floats per vertex written by overlayProject: {x_ndc, y_ndc, r, g, b} (roadmap 5.1).
+constexpr int kOverlayVertexValueCount = 5;
+
+/// Camera and image the overlay is projected into. `rotation` is camera-to-world, row-major 3x3;
+/// the pinhole model is in displayed preview pixels, and the image size is the one those
+/// intrinsics describe (D031).
+struct OverlayCamera {
+    double rotation[9];
+    double centre_m[3];
+    double focal_px;
+    double cx_px;
+    double cy_px;
+    int image_width_px;
+    int image_height_px;
+};
+
+/// Creates an empty scene. The caller owns the handle and must destroy it.
+OverlayHandle overlayCreate();
+
+/// Frees a scene. Destroying an unknown or already-destroyed handle is a no-op.
+void overlayDestroy(OverlayHandle handle);
+
+/// Replaces every point: `positions_m` is xyz per point, `rgb` is 0..1 per point. False on
+/// non-finite or negative input, which leaves the scene untouched.
+bool overlaySetPoints(
+    OverlayHandle handle,
+    const double* positions_m,
+    const float* rgb,
+    int count);
+
+/// Number of points in the scene, or 0 for an unknown handle.
+int overlayPointCount(OverlayHandle handle);
+
+/// Writes up to `max_vertices` visible vertices, far to near. Returns the number written.
+int overlayProject(
+    OverlayHandle handle,
+    const OverlayCamera& camera,
+    float* out_vertices,
+    int max_vertices);
+
 }  // namespace scand3d::bridge

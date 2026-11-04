@@ -2,11 +2,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <cmath>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 
+#include "overlay/overlay_scene.hpp"
 #include "sensors/keyframe_prior.hpp"
 #include "sensors/mahony_filter.hpp"
 #include "sensors/tilt_orientation.hpp"
@@ -40,6 +43,13 @@ struct FusionSession {
 std::mutex g_mutex;
 std::unordered_map<ImuHandle, std::unique_ptr<FusionSession>> g_sessions;
 std::atomic<ImuHandle> g_next_handle{1};
+
+// Overlay scenes are touched by the sensor thread (pose) and the UI thread (points), and a
+// projection runs on every pose sample, so they keep their own lock instead of serialising
+// against sensor fusion.
+std::mutex g_overlay_mutex;
+std::unordered_map<OverlayHandle, overlay::OverlayScene> g_overlay_scenes;
+std::atomic<OverlayHandle> g_next_overlay_handle{1};
 
 sensors::Quat quatFromArray(const double values[4]) {
     return {values[0], values[1], values[2], values[3]};
@@ -182,6 +192,112 @@ bool keyframeBaselineAccept(
     policy.max_baseline_rad = max_baseline_rad;
     return sensors::acceptKeyframe(
         quatFromArray(reference), quatFromArray(candidate), policy);
+}
+
+OverlayHandle overlayCreate() {
+    const OverlayHandle handle = g_next_overlay_handle.fetch_add(1);
+    std::lock_guard<std::mutex> lock(g_overlay_mutex);
+    g_overlay_scenes.emplace(handle, overlay::OverlayScene{});
+    return handle;
+}
+
+void overlayDestroy(OverlayHandle handle) {
+    std::lock_guard<std::mutex> lock(g_overlay_mutex);
+    g_overlay_scenes.erase(handle);
+}
+
+bool overlaySetPoints(
+    OverlayHandle handle,
+    const double* positions_m,
+    const float* rgb,
+    int count) {
+    if (count < 0 || (count > 0 && (positions_m == nullptr || rgb == nullptr))) {
+        return false;
+    }
+
+    std::vector<overlay::OverlayPoint> points;
+    points.reserve(static_cast<std::size_t>(count));
+    for (int i = 0; i < count; ++i) {
+        overlay::OverlayPoint point;
+        for (int axis = 0; axis < 3; ++axis) {
+            const double value = positions_m[3 * i + axis];
+            const float colour = rgb[3 * i + axis];
+            if (!std::isfinite(value) || !std::isfinite(colour)) {
+                return false;
+            }
+            point.position_m[static_cast<std::size_t>(axis)] = value;
+            point.rgb[axis] = colour < 0.0f ? 0.0f : (colour > 1.0f ? 1.0f : colour);
+        }
+        points.push_back(point);
+    }
+
+    std::lock_guard<std::mutex> lock(g_overlay_mutex);
+    const auto it = g_overlay_scenes.find(handle);
+    if (it == g_overlay_scenes.end()) {
+        return false;
+    }
+    it->second.setPoints(std::move(points));
+    return true;
+}
+
+int overlayPointCount(OverlayHandle handle) {
+    std::lock_guard<std::mutex> lock(g_overlay_mutex);
+    const auto it = g_overlay_scenes.find(handle);
+    if (it == g_overlay_scenes.end()) {
+        return 0;
+    }
+    return static_cast<int>(it->second.pointCount());
+}
+
+int overlayProject(
+    OverlayHandle handle,
+    const OverlayCamera& camera,
+    float* out_vertices,
+    int max_vertices) {
+    if (out_vertices == nullptr || max_vertices <= 0) {
+        return 0;
+    }
+
+    overlay::OverlayCamera input;
+    for (int i = 0; i < 9; ++i) {
+        if (!std::isfinite(camera.rotation[i])) {
+            return 0;
+        }
+        input.rotation[static_cast<std::size_t>(i)] = camera.rotation[i];
+    }
+    for (int i = 0; i < 3; ++i) {
+        if (!std::isfinite(camera.centre_m[i])) {
+            return 0;
+        }
+        input.centre_m[static_cast<std::size_t>(i)] = camera.centre_m[i];
+    }
+    input.focal_px = camera.focal_px;
+    input.cx_px = camera.cx_px;
+    input.cy_px = camera.cy_px;
+    input.image_width_px = camera.image_width_px;
+    input.image_height_px = camera.image_height_px;
+
+    std::vector<overlay::ColoredVertex> vertices;
+    {
+        std::lock_guard<std::mutex> lock(g_overlay_mutex);
+        const auto it = g_overlay_scenes.find(handle);
+        if (it == g_overlay_scenes.end()) {
+            return 0;
+        }
+        vertices = it->second.project(input);
+    }
+
+    const int written = std::min(static_cast<int>(vertices.size()), max_vertices);
+    for (int i = 0; i < written; ++i) {
+        const overlay::ColoredVertex& vertex = vertices[static_cast<std::size_t>(i)];
+        float* out = out_vertices + static_cast<std::ptrdiff_t>(i) * kOverlayVertexValueCount;
+        out[0] = vertex.ndc[0];
+        out[1] = vertex.ndc[1];
+        out[2] = vertex.rgb[0];
+        out[3] = vertex.rgb[1];
+        out[4] = vertex.rgb[2];
+    }
+    return written;
 }
 
 }  // namespace scand3d::bridge

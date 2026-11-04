@@ -112,13 +112,25 @@ sweeps, and the limits of that evidence are in `docs/benchmarks/phase4-sfm-verif
 ## Phase 5 - Live color overlay
 Goal: the reconstruction appears in color over the monochrome preview, aligned to the live view.
 
-- [ ] 5.1 Render sparse points over the grayscale camera background
+- [~] 5.1 Render sparse points over the grayscale camera background
 - [ ] 5.2 Use live IMU and tracking pose for the overlay camera
 - [ ] 5.3 Per-point color sampled from keyframes
 - [ ] 5.4 Overlay opacity slider and on/off toggle
 - [ ] 5.5 Drift check: overlay stays aligned after motion
 
 **Acceptance:** overlay stays within about 10 px of the real object after 10 seconds of handheld motion; overlay toggle is instant (under 100 ms).
+
+**Status:** 5.1 is implemented: `core/overlay/` projects coloured points through a pinhole camera
+in displayed-preview pixels and returns NDC vertices (D031), the bridge exposes the scene and the
+projection, and the preview renderer draws them as point sprites over the grayscale background in
+the same letterboxed rectangle, blending far to near without a depth buffer. Host tests cover the
+projection (centre, axis directions, behind-camera culling, colour, ordering, pose, degenerate
+cameras) and the C API round trip. The app has no reconstruction output yet (D030), so the render
+path is driven by a debug-only canned cloud, requested with `adb shell am broadcast -a
+com.scand3d.debug.CAPTURE --es cmd overlay --es value on`. That on-device check has **not been
+run**: the phone was disconnected when this landed, so the GL point pass is compiled and its
+projection is tested, but nothing has yet shown the points drawing over the preview. `[~]` means
+exactly that, plus real points are not fed in until the Phase 4 wiring exists; 5.2-5.5 are open.
 
 ---
 

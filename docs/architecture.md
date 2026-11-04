@@ -157,6 +157,28 @@ blocks, so only the 6N camera system is ever factorised (D028).
 `tests/tools/sfm_report.cpp`, the desktop binary that prints the acceptance numbers. Like the match
 visualizer it is built only in `nativeTest` and never packaged into the APK.
 
+## Live overlay (Phase 5)
+
+```
+reconstruction points + sampled colour (Phase 4 output)
+  └─ NativeCore.overlaySetPoints) -> overlay::OverlayScene        (core/overlay/)
+       └─ overlayProject(camera: intrinsics in displayed preview pixels, camera-to-world pose)
+            └─ { x_ndc, y_ndc, r, g, b } sorted far to near
+                 └─ OverlayFeed -> MonochromePreviewRenderer point-sprite pass
+                      └─ drawn into the same letterboxed rectangle as the camera image
+```
+
+`core/overlay/` owns the projection and depends only on `core/geometry/`; the camera contract
+(pixels of the displayed preview image, camera-to-world pose, NDC out) is D031. The renderer
+keeps its background pass untouched and adds one blended `GL_POINTS` pass afterwards, so the
+overlay cannot change how the monochrome preview looks. Vertices are handed over through
+`OverlayFeed`, which keeps the last frame and replays it into a renderer that was rebuilt with the
+view.
+
+Roadmap 5.1 is in place; 5.2 (live pose), 5.3 (colour sampling), 5.4 (opacity and toggle) and 5.5
+(drift check) are open. Because the app has no capture-to-reconstruction path yet (D030), the
+scene is filled from a debug-only canned cloud, marked `// STUB`.
+
 ## Current phase status
 
 - Phase 0 complete: project, native bridge, local test harnesses, synthetic scenes, benchmarks,
@@ -185,4 +207,7 @@ visualizer it is built only in `nativeTest` and never packaged into the APK.
   reprojection, 0.261 degree worst pose error); the real-object requirement of 90 percent
   registered keyframes has not been run, and the app-side path from captured frames to matches is
   still missing (D030, `docs/benchmarks/phase4-sfm-verification.md`).
-- Phases 5 and later are unimplemented; `roadmap.md` is the source of truth.
+- Phase 5 in progress: the sparse overlay projection and its GL pass are implemented and covered
+  by host tests, driven for now by a debug-only canned cloud because the app still has no
+  reconstruction output. 5.2-5.5 are open (D031).
+- Phases 6 and later are unimplemented; `roadmap.md` is the source of truth.

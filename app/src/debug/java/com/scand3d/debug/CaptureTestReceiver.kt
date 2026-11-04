@@ -33,6 +33,12 @@ class CaptureTestReceiver : BroadcastReceiver() {
                 Log.i(LOG_TAG, "simulated camera loss requested")
             }
 
+            OVERLAY -> {
+                val enabled = intent.getStringExtra(VALUE) == "on"
+                actions.setOverlayDemo(enabled)
+                Log.i(LOG_TAG, "overlay demo ${if (enabled) "on" else "off"}")
+            }
+
             else -> Log.i(LOG_TAG, "status frames=${actions.savedFrames()}")
         }
     }
@@ -40,8 +46,10 @@ class CaptureTestReceiver : BroadcastReceiver() {
     private companion object {
         const val LOG_TAG = "CaptureTest"
         const val COMMAND = "cmd"
+        const val VALUE = "value"
         const val START = "start"
         const val STOP = "stop"
         const val LOSS = "loss"
+        const val OVERLAY = "overlay"
     }
 }

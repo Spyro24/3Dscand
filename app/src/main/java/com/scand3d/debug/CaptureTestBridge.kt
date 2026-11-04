@@ -13,6 +13,9 @@ object CaptureTestBridge {
 
         /** Runs the production camera-loss path (the same callback the OS invokes). */
         fun simulateCameraLoss()
+
+        /** Shows or clears the canned overlay cloud used to verify the Phase 5 render path. */
+        fun setOverlayDemo(enabled: Boolean)
     }
 
     @Volatile

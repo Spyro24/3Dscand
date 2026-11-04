@@ -1,6 +1,7 @@
 #include <jni.h>
 
 #include <cmath>
+#include <vector>
 
 #include "bridge/bridge_api.hpp"
 #include "bridge/native_init.hpp"
@@ -100,4 +101,76 @@ Java_com_scand3d_core_bridge_NativeCore_nativeKeyframeBaselineAccept(
     const bool accepted = scand3d::bridge::keyframeBaselineAccept(
         first, second, min_baseline_rad, max_baseline_rad);
     return accepted ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeOverlayCreate(JNIEnv* /*env*/, jobject /*instance*/) {
+    return static_cast<jlong>(scand3d::bridge::overlayCreate());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeOverlayDestroy(JNIEnv* /*env*/, jobject /*instance*/,
+                                                             jlong handle) {
+    scand3d::bridge::overlayDestroy(static_cast<scand3d::bridge::OverlayHandle>(handle));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeOverlaySetPoints(JNIEnv* env, jobject /*instance*/,
+                                                               jlong handle,
+                                                               jdoubleArray positions_m,
+                                                               jfloatArray rgb) {
+    if (positions_m == nullptr || rgb == nullptr) {
+        return JNI_FALSE;
+    }
+    const jsize position_count = env->GetArrayLength(positions_m);
+    if (position_count % 3 != 0 || env->GetArrayLength(rgb) != position_count) {
+        return JNI_FALSE;
+    }
+    const jsize point_count = position_count / 3;
+    std::vector<double> positions(static_cast<std::size_t>(position_count));
+    std::vector<float> colours(static_cast<std::size_t>(position_count));
+    env->GetDoubleArrayRegion(positions_m, 0, position_count, positions.data());
+    env->GetFloatArrayRegion(rgb, 0, position_count, colours.data());
+    const bool stored = scand3d::bridge::overlaySetPoints(
+        static_cast<scand3d::bridge::OverlayHandle>(handle), positions.data(), colours.data(),
+        static_cast<int>(point_count));
+    return stored ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeOverlayProject(
+    JNIEnv* env, jobject /*instance*/, jlong handle, jdoubleArray rotation, jdoubleArray centre_m,
+    jdouble focal_px, jdouble cx_px, jdouble cy_px, jint image_width_px, jint image_height_px,
+    jfloatArray out_vertices) {
+    if (rotation == nullptr || centre_m == nullptr || out_vertices == nullptr ||
+        env->GetArrayLength(rotation) < 9 || env->GetArrayLength(centre_m) < 3) {
+        return 0;
+    }
+    const jsize out_length = env->GetArrayLength(out_vertices);
+    const int max_vertices = out_length / scand3d::bridge::kOverlayVertexValueCount;
+    if (max_vertices <= 0) {
+        return 0;
+    }
+
+    scand3d::bridge::OverlayCamera camera{};
+    env->GetDoubleArrayRegion(rotation, 0, 9, camera.rotation);
+    env->GetDoubleArrayRegion(centre_m, 0, 3, camera.centre_m);
+    camera.focal_px = focal_px;
+    camera.cx_px = cx_px;
+    camera.cy_px = cy_px;
+    camera.image_width_px = image_width_px;
+    camera.image_height_px = image_height_px;
+
+    std::vector<float> vertices(
+        static_cast<std::size_t>(max_vertices) *
+        static_cast<std::size_t>(scand3d::bridge::kOverlayVertexValueCount));
+    const int written = scand3d::bridge::overlayProject(
+        static_cast<scand3d::bridge::OverlayHandle>(handle), camera, vertices.data(),
+        max_vertices);
+    if (written <= 0) {
+        return 0;
+    }
+    env->SetFloatArrayRegion(out_vertices, 0, written * scand3d::bridge::kOverlayVertexValueCount,
+                             vertices.data());
+    return written;
 }
