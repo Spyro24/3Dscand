@@ -8,8 +8,10 @@
 namespace scand3d::sfm {
 
 struct PnpOptions {
-    /// Inlier threshold on the reprojection error, in pixels.
-    double threshold_px = 3.0;
+    /// Inlier threshold on the reprojection error, in pixels. 3 px on 480 px dark phone frames
+    /// refused views the map could have used; 5 px registers more of a real scan and tracks more
+    /// live frames (D056).
+    double threshold_px = 5.0;
     int max_iterations = 500;
     double confidence = 0.999;
     std::uint32_t seed = 17;

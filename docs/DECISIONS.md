@@ -855,3 +855,25 @@ here with its version, license and reason (agents.md sections 2 and 7).
   cannot use (plain wall, dark scene) is the only one that gets contour help, and its match indices
   still refer to the caller's sets. The object colours are computed on the overlay cloud after the
   photo sample, so unclustered detail keeps its photographed colour.
+
+## D056 — Reconstruct more of a real scan: all-pair growth, multi-view refit, 5 px PnP gate
+
+Measured on the replayed SM-G930F sessions (`bright480`: 26 frames, 480x360, focal 357 px).
+
+- A newly registered view used to create points only from the pair that registered it; on a real
+  pan that leaves most of the frame unmapped. Every validated pair to a registered view now
+  contributes points as well.
+- Points created by two views are refitted on all their observations before bundle adjustment, so a
+  third view improves a position instead of only attaching to it.
+- `PnpOptions::threshold_px` is 5 px (was 3). 3 px refused views the map could use: 12 map views
+  went from 4 registered / 105 points / 0 of 12 live frames tracked to 5 / 187 / 3; 8 map views from
+  3 / 105 / 3 of 18 to 3 / 105 / 4 of 18.
+- Pair gates are separate knobs now (`min_pair_matches` candidate matches vs `min_pair_inliers`
+  essential-matrix support), alongside `max_view_gap` and `match_ratio_percent`. Loosening the
+  ratio to 90 registers 7 of 8 views but tracks 0 of 18, so the default stays 80: coverage alone is
+  not progress, live-frame tracking is the metric.
+- Reprojection error cannot rank these maps: most points are seen by two views and fit those two by
+  construction, so a bad map and a good one both report about 0.4-0.5 px.
+- `Session::growthTrace()` records why each candidate view stayed out; `tracking_report` prints it.
+- The dark session still reconstructs nothing (0 of 3 views): 5 frames at 13-21/255 carry too few
+  repeatable features, which is the low-light limit of D052, not a registration bug.

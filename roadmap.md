@@ -100,6 +100,7 @@ Goal: camera poses and a sparse point cloud from a capture session.
 - [~] 4.5 Map store with track management and outlier removal
 - [~] 4.6 Reconstruction report (registered images, points, reprojection error)
 
+- [x] 4.7 Grow every validated pair into points and refit points on all views (D056)
 **Acceptance:** synthetic turntable scan reconstructs with mean reprojection error below 1 px and pose error below 1 degree; a real object scan registers at least 90 percent of keyframes.
 
 **Status:** implementation and host tests are complete for all six tasks (9 new gtest cases; 57

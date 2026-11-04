@@ -35,6 +35,18 @@ struct SfmOptions {
     double min_parallax_rad = 0.017453292519943295;
     /// Minimum fraction of a candidate's correspondences that PnP must keep.
     double min_pnp_inlier_ratio = 0.3;
+    /// Matches a view pair needs before it is worth an essential-matrix fit, and the strength
+    /// gate on that fit's inlier set.
+    int min_pair_matches = 12;
+    /// Inliers the pair's essential matrix must keep. Separate from `min_pair_matches`: a dim
+    /// frame may offer many candidate matches and still yield a poorly supported geometry, and
+    /// that is exactly what has to be rejected.
+    int min_pair_inliers = 12;
+    /// Views this far apart in capture order are still matched. Sequential capture means the
+    /// registration reference can be a few frames back, not only the immediate neighbour.
+    int max_view_gap = 2;
+    /// Lowe-style ratio gate for neighbour matching, in percent (lower is stricter).
+    int match_ratio_percent = 80;
     int bundle_adjust_every = 1;
 };
 
@@ -43,6 +55,8 @@ struct SfmResult {
     ReconstructionReport report;
     /// Views in the order they were registered; the first entry is the seed camera.
     std::vector<int> registration_order;
+    /// One line per registration attempt of the grown map: what matched and what stopped it.
+    std::vector<std::string> growth_trace;
     std::vector<KeyframeDecision> decisions;
 };
 

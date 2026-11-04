@@ -37,6 +37,9 @@ public:
     ReconstructionReport run();
 
     const Reconstruction& reconstruction() const { return result_.reconstruction; }
+
+    /// Why each candidate view of the last run did or did not enter the map (empty before a run).
+    const std::vector<std::string>& growthTrace() const { return result_.growth_trace; }
     const std::vector<feature::FeatureSet>& features() const { return features_; }
 
     int pointCount() const;

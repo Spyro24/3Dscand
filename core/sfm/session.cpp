@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -43,9 +44,9 @@ std::uint64_t featureKey(int view, int feature) {
            static_cast<std::uint32_t>(feature);
 }
 
-feature::MatchOptions neighbourMatchOptions() {
+feature::MatchOptions neighbourMatchOptions(int ratio_percent) {
     feature::MatchOptions options;
-    options.ratio_percent = 80;
+    options.ratio_percent = ratio_percent;
     options.cross_check = true;
     return options;
 }
@@ -221,17 +222,19 @@ ReconstructionReport Session::run() {
 
     // Matching is pairwise and geometric: a pair is validated by an essential matrix before any of
     // its matches can create a 3D point, so a false match cannot drag a point off its epipolar line.
-    const feature::MatchOptions match_options = neighbourMatchOptions();
+    const feature::MatchOptions match_options =
+        neighbourMatchOptions(options_.match_ratio_percent);
     std::vector<PairMatches> pairs;
     for (std::size_t first = 0; first < features_.size(); ++first) {
         const std::size_t limit =
-            std::min(features_.size(), first + static_cast<std::size_t>(kMaxViewGap) + 1);
+            std::min(features_.size(),
+                     first + static_cast<std::size_t>(std::max(1, options_.max_view_gap)) + 1);
         for (std::size_t second = first + 1; second < limit; ++second) {
             const std::vector<feature::FeatureMatch> matches =
                 feature::matchCornersThenContours(
                     features_[first], features_[second], match_options,
-                    static_cast<std::size_t>(kMinPairMatches));
-            if (matches.size() < static_cast<std::size_t>(kMinPairMatches)) {
+                    static_cast<std::size_t>(std::max(4, options_.min_pair_matches)));
+            if (matches.size() < static_cast<std::size_t>(std::max(4, options_.min_pair_matches))) {
                 continue;
             }
 
@@ -246,7 +249,8 @@ ReconstructionReport Session::run() {
                 correspondences, intrinsicsOf(cameras_[first]), intrinsicsOf(cameras_[second]),
                 options_.two_view);
             if (!ransac.valid ||
-                ransac.inlier_indices.size() < static_cast<std::size_t>(kMinPairMatches)) {
+                ransac.inlier_indices.size() <
+                    static_cast<std::size_t>(std::max(4, options_.min_pair_inliers))) {
                 continue;
             }
 
@@ -325,7 +329,7 @@ ReconstructionReport Session::run() {
 
     // Registers views one at a time against the nearest registered neighbour: PnP when the candidate
     // sees enough of the map, then the matches that pose actually explains become points.
-    auto grow = [this, &pairs](Reconstruction& reconstruction) {
+    auto grow = [this, &pairs](Reconstruction& reconstruction, std::vector<std::string>& trace) {
         std::unordered_map<std::uint64_t, int> point_of_feature = featureIndex(reconstruction);
         bool progress = true;
         while (progress) {
@@ -338,7 +342,8 @@ ReconstructionReport Session::run() {
                 const PairMatches* pair = nullptr;
                 int reference = -1;
                 std::size_t best_matches = 0;
-                for (int offset = -kMaxViewGap; offset <= kMaxViewGap; ++offset) {
+                const int gap = std::max(1, options_.max_view_gap);
+                for (int offset = -gap; offset <= gap; ++offset) {
                     if (offset == 0) {
                         continue;
                     }
@@ -359,6 +364,8 @@ ReconstructionReport Session::run() {
                     }
                 }
                 if (pair == nullptr) {
+                    trace.push_back("view " + std::to_string(view) +
+                                    ": no validated pair to a registered neighbour");
                     continue;
                 }
 
@@ -413,6 +420,9 @@ ReconstructionReport Session::run() {
                         correspondences, cameras_[static_cast<std::size_t>(reference)],
                         cameras_[static_cast<std::size_t>(view)], options_.two_view);
                     if (!relative.valid || relative.inliers < 8) {
+                        trace.push_back("view " + std::to_string(view) + ": two-view relative " +
+                                        (relative.valid ? "weak" : "invalid") + " (" +
+                                        std::to_string(relative.inliers) + " inliers)");
                         continue;
                     }
 
@@ -435,6 +445,8 @@ ReconstructionReport Session::run() {
                         }
                     }
                     if (scales.empty()) {
+                        trace.push_back("view " + std::to_string(view) +
+                                        ": relative pose has no shared map depth");
                         continue;
                     }
                     std::sort(scales.begin(), scales.end());
@@ -456,6 +468,9 @@ ReconstructionReport Session::run() {
                     rotationAngleRad(reference_view.pose.rotation, candidate_pose.rotation),
                     baselineM(reference_view.pose, candidate_pose), 1.0, options_.keyframe);
                 if (!decision.accept) {
+                    trace.push_back("view " + std::to_string(view) + ": keyframe rejected, rot " +
+                                    std::to_string(decision.rotation_rad) + " rad baseline " +
+                                    std::to_string(decision.baseline_m) + " m");
                     continue;
                 }
 
@@ -499,7 +514,7 @@ ReconstructionReport Session::run() {
                             state.camera, state.pose,
                             pixels_[static_cast<std::size_t>(view)]
                                   [static_cast<std::size_t>(mine)],
-                            triangulated, kMinParallaxRad)) {
+                            triangulated, options_.min_parallax_rad)) {
                         continue;
                     }
                     const int index = static_cast<int>(reconstruction.points.size());
@@ -517,8 +532,90 @@ ReconstructionReport Session::run() {
                     reconstruction.points.push_back(std::move(point));
                 }
 
+                // The reference pair alone leaves every feature that the new view shares with a
+                // *different* registered view without a point. On a real pan that is most of the
+                // frame, so each validated pair to a registered view contributes points as well.
+                for (const PairMatches& other_pair : pairs) {
+                    int other_view = -1;
+                    if (other_pair.view_a == view) {
+                        other_view = other_pair.view_b;
+                    } else if (other_pair.view_b == view) {
+                        other_view = other_pair.view_a;
+                    }
+                    if (other_view < 0 || other_view == reference ||
+                        !reconstruction.views[static_cast<std::size_t>(other_view)].registered) {
+                        continue;
+                    }
+                    const ViewState& other_state =
+                        reconstruction.views[static_cast<std::size_t>(other_view)];
+                    for (const std::pair<int, int>& match : other_pair.matches) {
+                        const int mine = featureOf(other_pair, view, match);
+                        const int theirs = otherFeatureOf(other_pair, view, match);
+                        if (point_of_feature.count(featureKey(view, mine)) != 0 ||
+                            point_of_feature.count(featureKey(other_view, theirs)) != 0) {
+                            continue;
+                        }
+                        TriangulationResult triangulated;
+                        if (!triangulateTwoView(
+                                other_state.camera, other_state.pose,
+                                pixels_[static_cast<std::size_t>(other_view)]
+                                      [static_cast<std::size_t>(theirs)],
+                                state.camera, state.pose,
+                                pixels_[static_cast<std::size_t>(view)]
+                                      [static_cast<std::size_t>(mine)],
+                                triangulated, options_.min_parallax_rad)) {
+                            continue;
+                        }
+                        const int index = static_cast<int>(reconstruction.points.size());
+                        MapPoint point;
+                        point.position_m = triangulated.position_m;
+                        point.observations = {
+                            {other_view, theirs,
+                             pixels_[static_cast<std::size_t>(other_view)]
+                                   [static_cast<std::size_t>(theirs)]},
+                            {view, mine,
+                             pixels_[static_cast<std::size_t>(view)]
+                                   [static_cast<std::size_t>(mine)]},
+                        };
+                        point_of_feature[featureKey(other_view, theirs)] = index;
+                        point_of_feature[featureKey(view, mine)] = index;
+                        reconstruction.points.push_back(std::move(point));
+                    }
+                }
+
                 prune(reconstruction);
                 point_of_feature = featureIndex(reconstruction);
+                trace.push_back("view " + std::to_string(view) + ": registered against " +
+                                std::to_string(reference) + " (" +
+                                std::to_string(pair->matches.size()) + " matches, " +
+                                std::to_string(validPointCount(reconstruction)) + " points)");
+            }
+        }
+    };
+
+    // Two-view triangulation only uses the pair that created a point; every view that later saw it
+    // was attached without improving its position. Refitting each point on all of its observations
+    // is the cheapest accuracy win available here, and it retires points whose views disagree.
+    auto refinePoints = [this](Reconstruction& reconstruction) {
+        for (MapPoint& point : reconstruction.points) {
+            if (!point.valid || point.observations.size() < 3) {
+                continue;
+            }
+            std::vector<ViewObservation> seen;
+            seen.reserve(point.observations.size());
+            for (const Observation& observation : point.observations) {
+                const ViewState& view = reconstruction.views[static_cast<std::size_t>(
+                    observation.view)];
+                if (!view.registered) {
+                    continue;
+                }
+                seen.push_back({view.camera, view.pose, observation.pixel});
+            }
+            TriangulationResult result;
+            if (seen.size() >= 2 && triangulatePoint(seen, result, options_.min_parallax_rad)) {
+                point.position_m = result.position_m;
+            } else {
+                point.valid = false;
             }
         }
     };
@@ -622,12 +719,14 @@ ReconstructionReport Session::run() {
         attempt.reconstruction = std::move(seed.reconstruction);
         attempt.registration_order = {seed.pair->view_a, seed.pair->view_b};
 
-        grow(attempt.reconstruction);
+        grow(attempt.reconstruction, attempt.growth_trace);
 
         const int registered_views = registeredCount(attempt.reconstruction);
         // Bundle adjustment only runs once a third view agrees: with two views it can trade the
         // reconstruction for a mirrored one that fits the same pixels (D029).
         if (registered_views >= 3 && validPointCount(attempt.reconstruction) > 0) {
+            refinePoints(attempt.reconstruction);
+            prune(attempt.reconstruction);
             optimize(attempt.reconstruction, options_.bundle_adjustment);
             prune(attempt.reconstruction);
         }

@@ -64,7 +64,22 @@ int main(int argc, char** argv) {
     if (disable_edges != 0) {
         feature_params.max_edge_points_per_level = 0;
     }
-    scand3d::sfm::Session session(scand3d::sfm::SfmOptions{}, feature_params);
+    auto env_int = [](const char* name, int fallback) {
+        const char* value = std::getenv(name);
+        return value != nullptr ? std::atoi(value) : fallback;
+    };
+    auto env_double = [](const char* name, double fallback) {
+        const char* value = std::getenv(name);
+        return value != nullptr ? std::atof(value) : fallback;
+    };
+    scand3d::sfm::SfmOptions options;
+    options.min_pair_matches = env_int("PAIR_MATCHES", options.min_pair_matches);
+    options.min_pair_inliers = env_int("INLIERS", options.min_pair_inliers);
+    options.max_view_gap = env_int("VIEW_GAP", options.max_view_gap);
+    options.match_ratio_percent = env_int("RATIO", options.match_ratio_percent);
+    options.pnp.threshold_px = env_double("PNP_PX", options.pnp.threshold_px);
+    options.min_parallax_rad = env_double("PARALLAX_DEG", 1.0) * 0.017453292519943295;
+    scand3d::sfm::Session session(options, feature_params);
     for (int index = 0; index < map_views; ++index) {
         if (session.addView(widths[static_cast<std::size_t>(index)],
                             heights[static_cast<std::size_t>(index)],
@@ -77,6 +92,12 @@ int main(int argc, char** argv) {
     const scand3d::sfm::ReconstructionReport report = session.run();
     std::printf("map: %d views, %d registered, %d points\n", session.viewCount(),
                 report.views_registered, session.pointCount());
+    std::printf("reprojection mean %.2f median %.2f max %.2f px, weak points %d\n",
+                report.mean_reprojection_px, report.median_reprojection_px,
+                report.max_reprojection_px, report.weakly_supported_points);
+    for (const std::string& line : session.growthTrace()) {
+        std::printf("  %s\n", line.c_str());
+    }
     // Feature counts separate "the image is too dark to detect corners" from "matching failed".
     std::printf("feature counts:");
     for (const auto& set : session.features()) {
