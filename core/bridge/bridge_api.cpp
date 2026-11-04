@@ -13,6 +13,7 @@
 #include "geometry/linalg.hpp"
 #include "mvs/pipeline.hpp"
 #include "overlay/overlay_scene.hpp"
+#include "overlay/object_clusters.hpp"
 #include "overlay/point_color.hpp"
 #include "sfm/session.hpp"
 #include "sfm/tracker.hpp"
@@ -523,7 +524,10 @@ int overlaySampleColors(
     }
     std::vector<overlay::OverlayPoint> points = it->second.points();
     const int sampled = overlay::samplePointColors(keyframe, input, points);
-    if (sampled > 0) {
+    // Then recolour per object: the photo colour keeps isolated detail readable, and the cluster
+    // colour is what shows which points belong to which surface (D055).
+    const overlay::ObjectClusterResult clusters = overlay::colourByObject(points);
+    if (sampled > 0 || clusters.objects > 0) {
         it->second.setPoints(std::move(points));
     }
     return sampled;

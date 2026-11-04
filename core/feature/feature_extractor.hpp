@@ -30,9 +30,8 @@ struct FeatureParams {
     /// Sobel magnitude (0..255) an edge sample needs; below this the contour is noise.
     int edge_min_magnitude = 48;
 
-    /// A level with fewer corners than this has effectively failed to find structure, so edge
-    /// samples stand in. The floor is deliberately low: a textured frame keeps exactly its
-    /// corners, and edges only appear where the detector found almost nothing at all.
+    /// A level with fewer corners than this has effectively failed to find structure, so contour
+    /// samples are extracted for it. Any other level keeps exactly its corners (D053/D055).
     int edge_corner_floor = 20;
 
     /// How many of the finest pyramid levels may contribute edge samples. One keeps them at the

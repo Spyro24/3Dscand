@@ -47,6 +47,7 @@ add_library(scand3d_test_util STATIC
     "${SCAND3D_CORE_DIR}/mvs/patchmatch.cpp"
     "${SCAND3D_CORE_DIR}/mvs/pipeline.cpp"
     "${SCAND3D_CORE_DIR}/mvs/types.cpp"
+    "${SCAND3D_CORE_DIR}/overlay/object_clusters.cpp"
     "${SCAND3D_CORE_DIR}/overlay/overlay_scene.cpp"
     "${SCAND3D_CORE_DIR}/overlay/point_color.cpp"
     "${SCAND3D_CORE_DIR}/sensors/keyframe_prior.cpp"
@@ -129,6 +130,12 @@ add_executable(sfm_report
     tools/sfm_report.cpp
 )
 target_link_libraries(sfm_report PRIVATE scand3d_test_util)
+
+add_executable(object_clusters_test
+    native/object_clusters_test.cpp
+)
+target_link_libraries(object_clusters_test PRIVATE scand3d_test_util GTest::gtest_main)
+gtest_discover_tests(object_clusters_test)
 
 add_executable(overlay_test
     native/overlay_test.cpp

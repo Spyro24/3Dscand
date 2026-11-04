@@ -15,7 +15,7 @@
 
 int main(int argc, char** argv) {
     if (argc < 4) {
-        std::printf("usage: tracking_report <dir> <map_views> <focal_px> [max_tracked] [force_edges]\n");
+        std::printf("usage: tracking_report <dir> <map_views> <focal_px> [max_tracked] [no_edges]\n");
         return 2;
     }
     const std::string directory = argv[1];
@@ -57,12 +57,12 @@ int main(int argc, char** argv) {
     std::printf("frames %zu at %dx%d, focal %.1f px, map from the first %d\n", frames.size(),
                 widths[0], heights[0], focal_px, map_views);
 
-    // Forcing edges treats every level as corner-poor, which is how the contour fallback is
-    // measured on a scan that does have corners (D053/D054).
-    const int force_edges = argc > 5 ? std::atoi(argv[5]) : 0;
+    // Contour points are extracted on every frame; passing 1 here turns them off, which is how the
+    // corner-first path is compared against the contour fallback (D055).
+    const int disable_edges = argc > 5 ? std::atoi(argv[5]) : 0;
     scand3d::feature::FeatureParams feature_params;
-    if (force_edges != 0) {
-        feature_params.edge_corner_floor = 1 << 20;
+    if (disable_edges != 0) {
+        feature_params.max_edge_points_per_level = 0;
     }
     scand3d::sfm::Session session(scand3d::sfm::SfmOptions{}, feature_params);
     for (int index = 0; index < map_views; ++index) {

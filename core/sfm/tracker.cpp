@@ -63,8 +63,11 @@ bool Tracker::track(
     feature::MatchOptions match_options;
     match_options.ratio_percent = kTrackingRatioPercent;
     match_options.cross_check = true;
-    const std::vector<feature::FeatureMatch> matches = feature::matchApproximate(
-        live, features_[static_cast<std::size_t>(reference)], match_options);
+    // Corners first; the contour points are only tried when the corners alone cannot place the
+    // frame (D055).
+    const std::vector<feature::FeatureMatch> matches = feature::matchCornersThenContours(
+        live, features_[static_cast<std::size_t>(reference)], match_options,
+        static_cast<std::size_t>(kMinPnpCorrespondences) * 2);
 
     std::vector<Vec3> object_points;
     std::vector<Vec2> image_points;

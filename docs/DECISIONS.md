@@ -827,3 +827,31 @@ here with its version, license and reason (agents.md sections 2 and 7).
 - **Consequence:** the direction is a penalty, never a hard rejection, so a fast rotation cannot
   throw away a correct match, and a straight contour still contributes only sparse points. A feature
   file written by an older build is rejected by the version check rather than misread.
+
+## D055 - corners are matched first, contours only as a fallback, and the cloud is coloured by object
+
+- **Decision:** matching goes through `feature::matchCornersThenContours`, which matches the corner
+  keypoints alone and only widens the search to the contour keypoints when that yields fewer than
+  the caller's minimum (the map's seed pairs need `kMinPairMatches`, the tracker needs twice the PnP
+  floor). Contour points are extracted only on a level that found fewer than `edge_corner_floor`
+  (20) corners, and the feature budget grows by their allowance so they can never displace a
+  corner. `overlay::colourByObject` groups the projected cloud into objects (points within
+  `link_distance_m` are linked, a group needs `min_points` members) and gives each object its own
+  golden-angle hue, applied after the photo colour is sampled, so a point cloud view shows which
+  points sit on which surface.
+- **Reason:** the request was to try corners first and fall back to contours, and to make the cloud
+  view show which points belong to which object. The measurements below also settled the extraction
+  question: contour points present in every frame's feature set cost registration even when the
+  matcher tries corners first, because the map's growth compares whole sets.
+- **Verified:** `FeatureMatching.CornersAreMatchedBeforeContours` (ten agreeing corners plus six
+  contour points: only the corners come back, and with the corners removed the same call returns the
+  contour matches); `ObjectClusters.*` covers two separated blobs getting two different colours, a
+  group below the minimum staying untouched, a chain linking into one object and unusable options.
+  Replaying the bright real scan with contours extracted everywhere gives 2 registered views and 94
+  points against 3 and 101 with the corner-poor rule, and the 0.95 precision fixture drops to 0.92,
+  which is why the rule stays. With the rule the replay is unchanged at 3 views / 101 points / 2 of
+  18 live frames.
+- **Consequence:** a frame with corners matches exactly as before; a frame the corner detector
+  cannot use (plain wall, dark scene) is the only one that gets contour help, and its match indices
+  still refer to the caller's sets. The object colours are computed on the overlay cloud after the
+  photo sample, so unclustered detail keeps its photographed colour.

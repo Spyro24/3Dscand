@@ -32,6 +32,15 @@ std::vector<FeatureMatch> matchBruteForce(
     const FeatureSet& train,
     const MatchOptions& options = {});
 
+/// Corners first, contours only as a fallback (D055): the corner matches are returned when there
+/// are at least `min_matches` of them, and only otherwise is the search widened to the contour
+/// points, which are ambiguous along their own edge. Match indices always refer to the input sets.
+std::vector<FeatureMatch> matchCornersThenContours(
+    const FeatureSet& query,
+    const FeatureSet& train,
+    const MatchOptions& options,
+    std::size_t min_matches);
+
 /// Approximate nearest neighbour through multi-index hashing: the 256-bit descriptor is split
 /// into eight 32-bit blocks, each indexed separately, and only descriptors sharing a block with
 /// the query are compared. Queries that land in an over-full or nearly empty bucket fall back to

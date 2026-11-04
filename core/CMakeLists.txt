@@ -27,6 +27,7 @@ add_library(scand3d_core SHARED
     mvs/patchmatch.cpp
     mvs/pipeline.cpp
     mvs/types.cpp
+    overlay/object_clusters.cpp
     overlay/overlay_scene.cpp
     overlay/point_color.cpp
     sensors/keyframe_prior.cpp

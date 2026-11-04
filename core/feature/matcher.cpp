@@ -90,6 +90,13 @@ bool passesRatio(int best_distance, int second_distance, int ratio_percent) {
 
 }  // namespace
 
+/// Approximate matching without the corner/contour split, shared by the public entry point and the
+/// staged matcher below.
+std::vector<FeatureMatch> matchApproximateSet(
+    const FeatureSet& query,
+    const FeatureSet& train,
+    const MatchOptions& options);
+
 std::vector<FeatureMatch> matchBruteForce(
     const FeatureSet& query,
     const FeatureSet& train,
@@ -147,6 +154,13 @@ std::vector<FeatureMatch> matchBruteForce(
 }
 
 std::vector<FeatureMatch> matchApproximate(
+    const FeatureSet& query,
+    const FeatureSet& train,
+    const MatchOptions& options) {
+    return matchApproximateSet(query, train, options);
+}
+
+std::vector<FeatureMatch> matchApproximateSet(
     const FeatureSet& query,
     const FeatureSet& train,
     const MatchOptions& options) {
@@ -209,6 +223,46 @@ std::vector<FeatureMatch> matchApproximate(
         matches.push_back({static_cast<int>(i), best_index, best_distance});
     }
     return matches;
+}
+
+std::vector<FeatureMatch> matchCornersThenContours(
+    const FeatureSet& query,
+    const FeatureSet& train,
+    const MatchOptions& options,
+    std::size_t min_matches) {
+    std::vector<FeatureMatch> matches;
+    if (query.empty() || train.empty()) {
+        return matches;
+    }
+
+    // The corner-only subsets, plus the map back to the caller's indices.
+    auto corners = [](const FeatureSet& features, FeatureSet& subset, std::vector<int>& indices) {
+        indices.clear();
+        for (std::size_t index = 0; index < features.size(); ++index) {
+            if (features.keypoints[index].is_edge) {
+                continue;
+            }
+            subset.keypoints.push_back(features.keypoints[index]);
+            subset.descriptors.push_back(features.descriptors[index]);
+            indices.push_back(static_cast<int>(index));
+        }
+    };
+    FeatureSet query_corners;
+    FeatureSet train_corners;
+    std::vector<int> query_index;
+    std::vector<int> train_index;
+    corners(query, query_corners, query_index);
+    corners(train, train_corners, train_index);
+
+    matches = matchApproximateSet(query_corners, train_corners, options);
+    if (matches.size() >= min_matches) {
+        for (FeatureMatch& match : matches) {
+            match.query_index = query_index[static_cast<std::size_t>(match.query_index)];
+            match.train_index = train_index[static_cast<std::size_t>(match.train_index)];
+        }
+        return matches;
+    }
+    return matchApproximateSet(query, train, options);
 }
 
 }  // namespace scand3d::feature

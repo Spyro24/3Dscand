@@ -171,12 +171,10 @@ FeatureSet extractFeatures(const GrayImage& image, const FeatureParams& params) 
             add_candidate(corner.x_px, corner.y_px, corner.response);
         }
 
-        // Corners alone leave a smooth or low-contrast surface without support: the corner
-        // detector needs two gradient directions, and a table edge or an object outline has one.
-        // So the edge map stands in exactly where the corner detector failed to find structure,
-        // and a textured frame keeps precisely its corners (D053).
-        const bool corner_poor =
-            static_cast<int>(corners.size()) < params.edge_corner_floor;
+        // Contour samples exist for the level where the corner detector found almost nothing; the
+        // matcher tries corners first and only widens to these when the corners are not enough
+        // (D055). Extracting them everywhere cost registration and precision for no gain.
+        const bool corner_poor = static_cast<int>(corners.size()) < params.edge_corner_floor;
         if (params.max_edge_points_per_level > 0 && corner_poor &&
             static_cast<int>(level_index) < params.edge_levels) {
             const EdgeMap edges = detectEdges(level.image, params.edge_params);
@@ -204,9 +202,13 @@ FeatureSet extractFeatures(const GrayImage& image, const FeatureParams& params) 
         return a.keypoint.response > b.keypoint.response;
     });
 
+    // Corners are ranked by a much larger response than contour points, so they come first; the
+    // budget still grows by the contour allowance so that adding the fallback never costs a corner.
+    const int feature_budget =
+        params.max_features + params.max_edge_points_per_level * params.edge_levels;
     const double dedup_squared = params.dedup_radius_px * params.dedup_radius_px;
     for (const Candidate& candidate : candidates) {
-        if (static_cast<int>(features.keypoints.size()) >= params.max_features) {
+        if (static_cast<int>(features.keypoints.size()) >= feature_budget) {
             break;
         }
         bool duplicate = false;

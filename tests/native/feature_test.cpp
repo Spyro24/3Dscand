@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <set>
@@ -251,6 +252,48 @@ TEST(FeaturePipeline, MatchedInliersAgreeWithKnown3DPoints) {
     ASSERT_GT(mapped, 10);
     EXPECT_GE(static_cast<double>(correct) / static_cast<double>(mapped), 0.95)
         << "correct " << correct << " of " << mapped << " verified inliers";
+}
+
+TEST(FeatureMatching, CornersAreMatchedBeforeContours) {
+    // Ten corner keypoints that agree exactly, plus six contour points that would also match: the
+    // corner pass has enough support, so the contour points must stay out of the result (D055).
+    FeatureSet query;
+    FeatureSet train;
+    for (int index = 0; index < 16; ++index) {
+        // One distinct byte set per keypoint, so an identical descriptor is 0 bits away and any
+        // other is 16, which the ratio test can separate cleanly.
+        Descriptor descriptor{};
+        descriptor[static_cast<std::size_t>(index)] = 0xFF;
+        const bool is_edge = index >= 10;
+        const Keypoint keypoint{static_cast<double>(index), 0.0, 1.0, 0.0, 1.0, 0.0, is_edge};
+        query.keypoints.push_back(keypoint);
+        query.descriptors.push_back(descriptor);
+        train.keypoints.push_back(keypoint);
+        train.descriptors.push_back(descriptor);
+    }
+
+    const auto matches =
+        scand3d::feature::matchCornersThenContours(query, train, MatchOptions{80, false, 8}, 5);
+    ASSERT_EQ(10u, matches.size());
+    for (const auto& match : matches) {
+        EXPECT_LT(match.query_index, 10);
+        EXPECT_FALSE(query.keypoints[static_cast<std::size_t>(match.query_index)].is_edge);
+    }
+
+    // With the corners gone, the same call falls back to the contour points instead of failing.
+    FeatureSet corners_missing = query;
+    for (std::size_t index = 0; index < 10; ++index) {
+        // Empty descriptors are far from every train descriptor and tie with each other, so the
+        // corner pass finds nothing and the fallback is the only way to a match.
+        corners_missing.descriptors[index] = Descriptor{};
+    }
+    const auto fallback = scand3d::feature::matchCornersThenContours(
+        corners_missing, train, MatchOptions{80, false, 8}, 5);
+    ASSERT_EQ(6u, fallback.size());
+    for (const auto& match : fallback) {
+        EXPECT_GE(match.query_index, 10);
+        EXPECT_TRUE(corners_missing.keypoints[static_cast<std::size_t>(match.query_index)].is_edge);
+    }
 }
 
 TEST(FeatureMatching, EdgeDirectionBreaksADescriptorTie) {

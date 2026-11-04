@@ -228,7 +228,9 @@ ReconstructionReport Session::run() {
             std::min(features_.size(), first + static_cast<std::size_t>(kMaxViewGap) + 1);
         for (std::size_t second = first + 1; second < limit; ++second) {
             const std::vector<feature::FeatureMatch> matches =
-                feature::matchApproximate(features_[first], features_[second], match_options);
+                feature::matchCornersThenContours(
+                    features_[first], features_[second], match_options,
+                    static_cast<std::size_t>(kMinPairMatches));
             if (matches.size() < static_cast<std::size_t>(kMinPairMatches)) {
                 continue;
             }
