@@ -14,7 +14,7 @@ Core features:
 - **Not allowed as the reconstruction core:** COLMAP, Meshroom, OpenMVG, OpenMVS, Open3D reconstruction, ARCore Depth or Scene Reconstruction APIs, or any other complete photogrammetry pipeline.
 - **Allowed:** Android platform APIs (Camera2, SensorManager, NDK, Vulkan or OpenGL ES, MediaStore, Storage Access Framework), general math libraries (Eigen, GLM), TensorFlow Lite for model inference, and image codecs (libjpeg, libpng).
 - Any new third-party dependency must be recorded in `DECISIONS.md` with its version, license and reason.
-- Minimum Android 10 (API 29), target arm64-v8a. Test on at least two physical phones before a release.
+- Minimum Android 10 (API 29), target arm64-v8a. Test on the connected physical phone before a release; one test device is enough (see `docs/DECISIONS.md` D010).
 - Kotlin for the UI and app shell. C++17 (NDK, CMake) for the reconstruction core, image processing and rendering.
 - Fully offline. No network calls during capture or reconstruction. Models ship inside `assets/`.
 - Photos and models stay on the device unless the user explicitly exports them.

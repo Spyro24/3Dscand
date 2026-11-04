@@ -31,9 +31,9 @@ I Scand3dApp: native core loaded
 
 UI text from `uiautomator dump`: `3D Scan`, `Idle`, `native core 0.1.0`.
 
-## Not covered
+## Scope
 
-- Only one of the two devices required by the Phase 0 acceptance has run this build.
-- The device reports API 34, so behaviour at minSdk 29 is untested.
-- CI has not run this build (roadmap 0.4); the APK was built locally with
+- Single-device verification is the project policy (D010), so no second phone is required.
+- The device reports API 34; `minSdk` 29 behaviour is deliberately not tested (D010).
+- CI runs only at public release (roadmap 12.1). The APK was built locally with
   `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew :app:assembleDebug`.

@@ -51,8 +51,27 @@ here with its version, license and reason (agents.md sections 2 and 7).
   publishing account yet.
 - **Consequence:** Changing it later breaks saved session paths and installed-update continuity.
 
+### D010 - Verification policy: one device, no API 29 floor test, CI only at public release
+- **Decision:** Verification runs on the connected physical phone (currently a Samsung SM-G930F,
+  API 34). A second device is not required, and behaviour at `minSdk` 29 is not exercised.
+  Continuous integration is wired only for the public release (roadmap 12.1); until then builds
+  and tests are run locally.
+- **Reason:** Set by the project owner to keep the loop short; the minimum SDK stays 29 as a
+  support claim, not as a tested configuration.
+- **Consequence:** `agents.md` section 2 and the Phase 0 acceptance line in `roadmap.md` were
+  updated to match. Runtime risk is concentrated on the one test device.
+
+### D011 - googletest v1.15.2 for C++ unit tests
+- **License:** BSD-3-Clause.
+- **Reason:** Roadmap 0.4 prescribes gtest. It is fetched with CMake `FetchContent` (tag v1.15.2,
+  shallow clone) into the host test build only, because the app's `libscand3d_core.so` is
+  arm64-v8a and cannot be loaded by the x86_64 host JVM. The core sources are compiled for the
+  host instead, so no test framework ships in the APK.
+- **Consequence:** The first `nativeTest` run needs network access; afterwards CMake reuses the
+  fetched sources in `build/native-tests`.
+
 ## Open items
-- CI pipeline (roadmap 0.4) - not set up yet; builds are verified locally with `assembleDebug`.
+- CI pipeline (roadmap 12.1) - not set up yet; builds and tests are verified locally (D010).
 - `docs/architecture.md` (roadmap 0.7) - not written yet.
 - Feature detector, meshing strategy and segmentation model (agents.md section 7) - still open,
   decided in Phases 3, 7 and 8.
