@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <vector>
 
 #include "feature/feature_extractor.hpp"
@@ -8,6 +9,8 @@
 #include "sfm/pnp.hpp"
 
 namespace scand3d::sfm {
+
+class Tracker;
 
 /// Turns captured gray frames into a sparse map and tracks a new frame against it: the
 /// features -> matching -> reconstruction orchestration the app was missing (D030). It lives with
@@ -45,6 +48,9 @@ public:
 
     /// Copies one view's estimated pose. False for an out-of-range index.
     bool copyCamera(int index, double out_rotation[9], double out_centre_m[3]) const;
+
+    /// Immutable copy of the map, for tracking while this session runs the next one (D051).
+    std::shared_ptr<const Tracker> snapshot() const;
 
     /// Extracts features from a fresh frame, matches them against `view_hint` in the map (or the
     /// last registered view) and estimates the pose by PnP. False when too few correspondences

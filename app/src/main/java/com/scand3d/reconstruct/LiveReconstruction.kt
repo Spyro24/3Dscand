@@ -18,7 +18,7 @@ import java.util.ArrayDeque
  * property of a scan.
  */
 class LiveReconstruction(
-    private val on_cloud: (DoubleArray, DoubleArray?) -> Unit,
+    private val on_cloud: (DoubleArray, DoubleArray?, Long) -> Unit,
     private val min_interval_ms: Long = MIN_INTERVAL_MS,
     private val max_views: Int = MAX_VIEWS,
 ) {
@@ -204,7 +204,9 @@ class LiveReconstruction(
                 "${elapsed} ms",
         )
         if (positions.isNotEmpty()) {
-            on_cloud(positions, reference_orientation)
+            // The snapshot is handed out with the cloud: the caller owns it from here and destroys
+            // it when the next one replaces it (D051).
+            on_cloud(positions, reference_orientation, NativeCore.trackerCreate(handle))
         }
     }
 

@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -12,6 +13,7 @@
 #include "sfm/pipeline.hpp"
 #include "sfm/pose.hpp"
 #include "sfm/session.hpp"
+#include "sfm/tracker.hpp"
 #include "synthetic/sfm_scan.hpp"
 #include "synthetic/synthetic_scene.hpp"
 
@@ -395,4 +397,78 @@ TEST(Session, KeepsEveryRunAnchoredToTheFirstView) {
     ASSERT_GT(before_mean, 0.0);
     EXPECT_LT(after_mean, 2.0 * before_mean);
     EXPECT_GT(after_mean, 0.5 * before_mean);
+}
+
+// The app tracks every preview frame while the session runs the next map, so the pose has to come
+// from a snapshot: a run holds the session for seconds and would otherwise stall tracking (D051).
+TEST(Session, SnapshotTracksIndependentlyOfLaterRuns) {
+    const syn::Scene scene = renderScene(99u);
+    scand3d::sfm::Session session = makeSession();
+    ASSERT_EQ(addRing(session, scene, kViewCount), kViewCount);
+    ASSERT_GE(session.run().views_registered, 2);
+    ASSERT_GT(session.pointCount(), 10);
+
+    const std::shared_ptr<const scand3d::sfm::Tracker> tracker = session.snapshot();
+    ASSERT_TRUE(tracker != nullptr);
+    EXPECT_GT(tracker->viewCount(), 0);
+    EXPECT_GT(tracker->pointCount(), 10u);
+
+    // Not every ring view is in the map, so track the first one the snapshot can place - the same
+    // reason the session test above scans for its best view.
+    int tracked_view = -1;
+    int tracked_inliers = 0;
+    scand3d::sfm::Pose tracked_pose;
+    for (int index = 0; index < kViewCount && tracked_view < 0; ++index) {
+        const syn::Image candidate = syn::render(scene, index);
+        const syn::Camera& camera = scene.cameras[static_cast<std::size_t>(index)];
+        scand3d::sfm::Pose pose;
+        int inliers = 0;
+        if (tracker->track(candidate.width_px, candidate.height_px, candidate.pixels.data(),
+                           camera.focal_px, camera.cx_px, camera.cy_px, pose, inliers, index) &&
+            inliers > 10) {
+            tracked_view = index;
+            tracked_inliers = inliers;
+            tracked_pose = pose;
+        }
+    }
+    ASSERT_GE(tracked_view, 0) << "the snapshot could not place any map view";
+
+    const syn::Image image = syn::render(scene, tracked_view);
+    const syn::Camera& camera = scene.cameras[static_cast<std::size_t>(tracked_view)];
+
+    // A later run rewrites the session's reconstruction; the snapshot must not move with it.
+    session.run();
+    scand3d::sfm::Pose again_pose;
+    int again_inliers = 0;
+    ASSERT_TRUE(tracker->track(image.width_px, image.height_px, image.pixels.data(),
+                               camera.focal_px, camera.cx_px, camera.cy_px, again_pose,
+                               again_inliers, tracked_view));
+    EXPECT_EQ(again_inliers, tracked_inliers);
+    for (int axis = 0; axis < 3; ++axis) {
+        EXPECT_NEAR(again_pose.camera_centre_m[static_cast<std::size_t>(axis)],
+                    tracked_pose.camera_centre_m[static_cast<std::size_t>(axis)], 1e-9);
+    }
+
+    std::vector<unsigned char> blank(static_cast<std::size_t>(kWidthPx) * kHeightPx, 0);
+    scand3d::sfm::Pose blank_pose;
+    int blank_inliers = 9;
+    EXPECT_FALSE(tracker->track(kWidthPx, kHeightPx, blank.data(), kFocalPx, 0.5 * kWidthPx,
+                                0.5 * kHeightPx, blank_pose, blank_inliers, tracked_view));
+    EXPECT_EQ(blank_inliers, 0);
+}
+
+TEST(Session, EmptySnapshotRefusesToTrack) {
+    const syn::Scene scene = renderScene(7u);
+    scand3d::sfm::Session session = makeSession();
+    const std::shared_ptr<const scand3d::sfm::Tracker> tracker = session.snapshot();
+    ASSERT_TRUE(tracker != nullptr);
+    EXPECT_TRUE(tracker->empty());
+
+    const syn::Image image = syn::render(scene, 0);
+    const syn::Camera& camera = scene.cameras[0];
+    scand3d::sfm::Pose pose;
+    int inliers = 5;
+    EXPECT_FALSE(tracker->track(image.width_px, image.height_px, image.pixels.data(),
+                                camera.focal_px, camera.cx_px, camera.cy_px, pose, inliers, 0));
+    EXPECT_EQ(inliers, 0);
 }

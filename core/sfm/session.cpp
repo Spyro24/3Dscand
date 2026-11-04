@@ -14,6 +14,7 @@
 #include "sfm/pnp.hpp"
 #include "sfm/pose.hpp"
 #include "sfm/report.hpp"
+#include "sfm/tracker.hpp"
 #include "sfm/triangulation.hpp"
 
 namespace scand3d::sfm {
@@ -694,6 +695,26 @@ bool Session::copyCamera(int index, double out_rotation[9], double out_centre_m[
     return true;
 }
 
+std::shared_ptr<const Tracker> Session::snapshot() const {
+    // Copy the map rather than sharing it: the session rewrites its reconstruction on every run,
+    // and a tracker that saw a half-updated map would place the camera in a frame that no longer
+    // matches the cloud on screen.
+    auto tracker = std::shared_ptr<Tracker>(new Tracker());
+    tracker->features_ = features_;
+    tracker->registered_.reserve(result_.reconstruction.views.size());
+    for (const ViewState& view : result_.reconstruction.views) {
+        tracker->registered_.push_back(view.registered);
+    }
+    tracker->point_of_feature_ = featureIndex(result_.reconstruction);
+    tracker->point_positions_.reserve(result_.reconstruction.points.size());
+    for (const MapPoint& point : result_.reconstruction.points) {
+        tracker->point_positions_.push_back(point.position_m);
+    }
+    tracker->feature_params_ = feature_params_;
+    tracker->pnp_ = options_.pnp;
+    return tracker;
+}
+
 bool Session::trackPose(
     int width_px,
     int height_px,
@@ -704,74 +725,10 @@ bool Session::trackPose(
     Pose& out_pose,
     int& out_inliers,
     int view_hint) const {
-    out_inliers = 0;
-    if (!ran_ || gray == nullptr || width_px <= 0 || height_px <= 0 || !(focal_px > 0.0)) {
-        return false;
-    }
-
-    feature::GrayImage image;
-    image.width_px = width_px;
-    image.height_px = height_px;
-    image.pixels.assign(gray,
-                        gray + static_cast<std::size_t>(width_px) * static_cast<std::size_t>(height_px));
-    const feature::FeatureSet live = feature::extractFeatures(image, feature_params_);
-    if (live.empty()) {
-        return false;
-    }
-
-    int reference = view_hint;
-    if (reference < 0 ||
-        static_cast<std::size_t>(reference) >= result_.reconstruction.views.size()) {
-        reference = -1;
-        for (std::size_t index = result_.reconstruction.views.size(); index > 0; --index) {
-            if (result_.reconstruction.views[index - 1].registered) {
-                reference = static_cast<int>(index - 1);
-                break;
-            }
-        }
-    }
-    if (reference < 0 || static_cast<std::size_t>(reference) >= features_.size()) {
-        return false;
-    }
-
-    const std::unordered_map<std::uint64_t, int> point_of_feature =
-        featureIndex(result_.reconstruction);
-
-    feature::MatchOptions match_options;
-    match_options.ratio_percent = 85;
-    match_options.cross_check = true;
-    const std::vector<feature::FeatureMatch> matches = feature::matchApproximate(
-        live, features_[static_cast<std::size_t>(reference)], match_options);
-
-    std::vector<Vec3> object_points;
-    std::vector<Vec2> image_points;
-    object_points.reserve(matches.size());
-    image_points.reserve(matches.size());
-    for (const feature::FeatureMatch& match : matches) {
-        const auto found = point_of_feature.find(featureKey(reference, match.train_index));
-        if (found == point_of_feature.end()) {
-            continue;
-        }
-        const MapPoint& point =
-            result_.reconstruction.points[static_cast<std::size_t>(found->second)];
-        object_points.push_back(point.position_m);
-        image_points.push_back(
-            {live.keypoints[static_cast<std::size_t>(match.query_index)].x_px,
-             live.keypoints[static_cast<std::size_t>(match.query_index)].y_px});
-    }
-
-    if (object_points.size() < static_cast<std::size_t>(kMinPnpCorrespondences)) {
-        return false;
-    }
-
-    const PnpResult pnp = estimatePoseRansac(
-        object_points, image_points, CameraModel{focal_px, cx_px, cy_px}, options_.pnp);
-    if (!pnp.valid) {
-        return false;
-    }
-    out_pose = pnp.pose;
-    out_inliers = pnp.inliers;
-    return true;
+    // One implementation, in the snapshot: the app tracks off the session lock, and the two paths
+    // must not drift apart.
+    return snapshot()->track(width_px, height_px, gray, focal_px, cx_px, cy_px, out_pose,
+                             out_inliers, view_hint);
 }
 
 }  // namespace scand3d::sfm

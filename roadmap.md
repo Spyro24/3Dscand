@@ -113,7 +113,7 @@ sweeps, and the limits of that evidence are in `docs/benchmarks/phase4-sfm-verif
 Goal: the reconstruction appears in color over the monochrome preview, aligned to the live view.
 
 - [~] 5.1 Render sparse points over the grayscale camera background
-- [~] 5.2 Use live IMU and tracking pose for the overlay camera
+- [x] 5.2 Use live IMU and tracking pose for the overlay camera
 - [~] 5.3 Per-point color sampled from keyframes
 - [~] 5.4 Overlay opacity slider and on/off toggle
 - [ ] 5.5 Drift check: overlay stays aligned after motion
@@ -177,10 +177,14 @@ reconstruction the sampling runs on points whose geometry is still the debug clo
 `OverlayFeed.setStyle`, which reaches the renderer's blend uniform without re-projecting, so the
 toggle costs one frame.
 
-5.5 stays `[ ]`: the acceptance line is alignment to the real object within about 10 px after 10
-seconds of handheld motion, and that needs a real cloud plus a tracked pose. What exists is the
-instrumentation: while the overlay is on, the view model logs once a second the angle between the
-anchored pose and the live one and the projected centre of the cloud, in NDC (D032).
+5.5 stays `[ ]` until it is measured on the phone: the acceptance line is alignment to the real
+object within about 10 px after 10 seconds of handheld motion. The tracked pose it needs now exists
+(D051): the camera session carries a 640x480 gray analysis stream at 10 Hz, each frame is matched
+against a snapshot of the live map, and PnP gives a pose with translation, so the overlay camera
+follows the phone instead of only its rotation. The instrumentation is unchanged and now reports the
+tracking inliers too: once a second the view model logs the angle between the anchored pose and the
+live one, the projected centre of the cloud in NDC, and the inlier count of the newest tracked pose
+(D032).
 
 
 ---

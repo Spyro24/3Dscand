@@ -15,6 +15,7 @@
 #include "overlay/overlay_scene.hpp"
 #include "overlay/point_color.hpp"
 #include "sfm/session.hpp"
+#include "sfm/tracker.hpp"
 #include "sensors/keyframe_prior.hpp"
 #include "sensors/mahony_filter.hpp"
 #include "sensors/tilt_orientation.hpp"
@@ -61,6 +62,12 @@ std::atomic<OverlayHandle> g_next_overlay_handle{1};
 std::mutex g_reconstruction_mutex;
 std::unordered_map<ReconstructionHandle, std::unique_ptr<sfm::Session>> g_reconstructions;
 std::atomic<ReconstructionHandle> g_next_reconstruction_handle{1};
+
+// Trackers own a snapshot of a map, so they need a lock of their own: tracking runs on every
+// preview frame while a reconstruction run holds its lock for seconds (D051).
+std::mutex g_tracker_mutex;
+std::unordered_map<TrackerHandle, std::shared_ptr<const sfm::Tracker>> g_trackers;
+std::atomic<TrackerHandle> g_next_tracker_handle{1};
 
 sensors::Quat quatFromArray(const double values[4]) {
     return {values[0], values[1], values[2], values[3]};
@@ -412,6 +419,71 @@ int reconstructionTrackPose(
         out_centre_m[i] = pose.camera_centre_m[static_cast<std::size_t>(i)];
     }
     return inliers;
+}
+
+TrackerHandle trackerCreate(ReconstructionHandle handle) {
+    std::shared_ptr<const sfm::Tracker> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(g_reconstruction_mutex);
+        const auto it = g_reconstructions.find(handle);
+        if (it == g_reconstructions.end()) {
+            return 0;
+        }
+        // Copied under the reconstruction lock on purpose: the snapshot has to be of one map, not
+        // of a run that is halfway through rewriting it.
+        snapshot = it->second->snapshot();
+    }
+    if (snapshot == nullptr || snapshot->empty()) {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> lock(g_tracker_mutex);
+    const TrackerHandle tracker = g_next_tracker_handle++;
+    g_trackers.emplace(tracker, std::move(snapshot));
+    return tracker;
+}
+
+int trackerTrack(
+    TrackerHandle handle,
+    const unsigned char* gray,
+    int width_px,
+    int height_px,
+    double focal_px,
+    double cx_px,
+    double cy_px,
+    double out_rotation[9],
+    double out_centre_m[3]) {
+    if (gray == nullptr || out_rotation == nullptr || out_centre_m == nullptr) {
+        return 0;
+    }
+    std::shared_ptr<const sfm::Tracker> tracker;
+    {
+        std::lock_guard<std::mutex> lock(g_tracker_mutex);
+        const auto it = g_trackers.find(handle);
+        if (it == g_trackers.end()) {
+            return 0;
+        }
+        // Held by shared_ptr so a destroy on the UI thread cannot free it mid-frame.
+        tracker = it->second;
+    }
+
+    sfm::Pose pose;
+    int inliers = 0;
+    if (!tracker->track(width_px, height_px, gray, focal_px, cx_px, cy_px, pose, inliers)) {
+        return 0;
+    }
+    for (int i = 0; i < 9; ++i) {
+        out_rotation[i] = pose.rotation[static_cast<std::size_t>(i)];
+    }
+    for (int i = 0; i < 3; ++i) {
+        out_centre_m[i] = pose.camera_centre_m[static_cast<std::size_t>(i)];
+    }
+    return inliers;
+}
+
+void trackerDestroy(TrackerHandle handle) {
+    std::lock_guard<std::mutex> lock(g_tracker_mutex);
+    g_trackers.erase(handle);
 }
 
 int overlaySampleColors(

@@ -20,6 +20,7 @@ import com.scand3d.debug.CaptureTestBridge
 import com.scand3d.reconstruct.CloudPlyWriter
 import com.scand3d.reconstruct.DenseRequest
 import com.scand3d.reconstruct.LiveReconstruction
+import com.scand3d.reconstruct.LiveTracking
 import com.scand3d.reconstruct.MvsQuality
 import com.scand3d.reconstruct.ReconstructionRunner
 import com.scand3d.render.MonochromePreviewRenderer
@@ -80,6 +81,15 @@ class CaptureViewModel(application: Application) :
     private var overlayBasis: DoubleArray? = null
     private var lastOverlayPublishMs = 0L
     private var lastDriftLogMs = 0L
+
+    // Live pose tracking against the map (D051). The IMU only knows rotation, so translation is
+    // what keeps the cloud on the object while the phone moves.
+    private val tracking = LiveTracking()
+
+    /** Scale the map was rescaled by for the overlay; a tracked camera centre has to follow it. */
+    private var overlayScale = 1.0
+
+    private var analysisFrames = 0
 
     init {
         CaptureTestBridge.actions = this
@@ -183,7 +193,9 @@ class CaptureViewModel(application: Application) :
         // A dense pass on the previous scan would compete with this capture's live map.
         denseRunner?.cancel()
         liveReconstruction = LiveReconstruction(
-            on_cloud = { points, reference -> applyReconstruction(points, reference) },
+            on_cloud = { points, reference, tracker ->
+                applyReconstruction(points, reference, tracker_handle = tracker)
+            },
         )
         savedFrameIndex = 0
         memoryTick = 0
@@ -379,7 +391,13 @@ class CaptureViewModel(application: Application) :
         reference_quaternion: DoubleArray? = null,
         source: String = "sparse",
         publish_stream: Boolean = true,
+        tracker_handle: Long = 0L,
     ) {
+        // The snapshot is consumed here whether or not the cloud is usable, so no native handle
+        // is leaked when a run produces points but the overlay cannot take them.
+        if (tracker_handle != 0L) {
+            tracking.replaceTracker(tracker_handle)
+        }
         // The Blender add-on polls this file over adb (tools/blender, D044). It is written before
         // the overlay work so a viewer still gets the map when the preview is not running. Only the
         // sparse map is streamed: that file is the live map the add-on reads.
@@ -478,6 +496,9 @@ class CaptureViewModel(application: Application) :
             return rotated
         }
         val scale = OVERLAY_CLOUD_MEDIAN_M / median
+        // The tracked camera centre is in the map's free-scale frame, so it takes the same factor
+        // the points just did; otherwise the pose and the cloud would disagree about distance.
+        overlayScale = scale
         for (index in rotated.indices) {
             rotated[index] *= scale
         }
@@ -568,10 +589,19 @@ class CaptureViewModel(application: Application) :
         }
         val centre_x = if (count > 0) sum_x / count else Double.NaN
         val centre_y = if (count > 0) sum_y / count else Double.NaN
+        val tracked = tracking.pose()
+        val tracking_text = if (tracked != null) {
+            "tracked ${tracked.inliers} inliers, camera in overlay frame " +
+                "(${(tracked.centre_m[0] * overlayScale).format(3)}, " +
+                "${(tracked.centre_m[1] * overlayScale).format(3)}, " +
+                "${(tracked.centre_m[2] * overlayScale).format(3)}) m"
+        } else {
+            "tracked none, IMU rotation only"
+        }
         Log.i(
             LOG_TAG,
             "overlay drift: pose ${(angle_rad * 180.0 / Math.PI).format(2)} deg, " +
-                "centre (${centre_x.format(4)}, ${centre_y.format(4)})",
+                "centre (${centre_x.format(4)}, ${centre_y.format(4)}), $tracking_text",
         )
     }
 
@@ -599,6 +629,30 @@ class CaptureViewModel(application: Application) :
             frontFacing = false,
             displayRotationDeg = displayRotationDeg(),
         )
+        // A tracked pose carries translation and is the real overlay camera; the IMU path below is
+        // the fallback for the seconds before the first frame registers (D051).
+        val tracked = tracking.pose()
+        val anchor_basis = overlayBasis
+        if (tracked != null && anchor_basis != null && overlayPointCount > 0) {
+            val centre = OverlayGeometry.applyToVector(anchor_basis, tracked.centre_m)
+            return OverlayCameraParams(
+                // The cloud lives in basis * map, so the map's camera pose is rotated by the same
+                // basis and its centre scaled by the same factor: the projection then agrees with
+                // what the map's own camera would have produced.
+                rotation = OverlayGeometry.multiply(anchor_basis, tracked.rotation),
+                centre_m = doubleArrayOf(
+                    centre[0] * overlayScale,
+                    centre[1] * overlayScale,
+                    centre[2] * overlayScale,
+                ),
+                focal_px = focal_px,
+                cx_px = width / 2.0,
+                cy_px = height / 2.0,
+                image_width_px = width,
+                image_height_px = height,
+            )
+        }
+
         val live = fusedImu.latest()?.quaternion_wxyz?.toDoubleArray()
         val rotation = when {
             live == null -> OverlayGeometry.IDENTITY_ROTATION
@@ -682,6 +736,8 @@ class CaptureViewModel(application: Application) :
         }
         overlayBasis = null
         overlayPointCount = 0
+        // Nothing on screen to hold in place, so stop tracking against the map as well.
+        tracking.replaceTracker(0L)
     }
 
     fun retry() {
@@ -689,6 +745,7 @@ class CaptureViewModel(application: Application) :
         val caller = Throwable().stackTrace.getOrNull(2)?.toString() ?: "unknown"
         Log.i(LOG_TAG, "retry requested from phase=${_state.value.phase} caller=$caller")
         releaseController()
+        tracking.replaceTracker(0L)
         fusedImu.reset()
         motionMonitor.reset()
         recorder = null
@@ -703,6 +760,24 @@ class CaptureViewModel(application: Application) :
             benchmark?.recordFrameTime(savedFrameIndex, 1_000.0 / fps)
         }
         _state.value = _state.value.copy(fps = fps)
+    }
+
+    /**
+     * Camera thread: one gray preview frame for tracking. Only the live map is worth matching
+     * against, so this costs nothing until a cloud is on screen.
+     */
+    override fun onAnalysisFrame(width_px: Int, height_px: Int, gray: ByteArray) {
+        // Logged once: it is the only way to tell a camera that provides no analysis output apart
+        // from tracking that has simply not locked yet (D051).
+        if (analysisFrames == 0) {
+            Log.i(LOG_TAG, "analysis stream: ${width_px}x$height_px gray frames arriving")
+        }
+        analysisFrames += 1
+        if (overlayHandle == 0L || overlayPointCount == 0) {
+            return
+        }
+        val controller = controller ?: return
+        tracking.onFrame(gray, width_px, height_px, controller.focalPxFor(maxOf(width_px, height_px)))
     }
 
     override fun onLocked(settings: LockedCaptureSettings) {
@@ -768,6 +843,7 @@ class CaptureViewModel(application: Application) :
         releaseController()
         closeBenchmark()
         releaseOverlay()
+        tracking.close()
         fusedImu.close()
         recorder = null
     }

@@ -211,6 +211,46 @@ Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionTrackPose(
 }
 
 extern "C" JNIEXPORT jlong JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeTrackerCreate(JNIEnv* /*env*/, jobject /*instance*/,
+                                                           jlong handle) {
+    return static_cast<jlong>(scand3d::bridge::trackerCreate(
+        static_cast<scand3d::bridge::ReconstructionHandle>(handle)));
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeTrackerTrack(
+    JNIEnv* env, jobject /*instance*/, jlong handle, jbyteArray gray, jint width_px, jint height_px,
+    jdouble focal_px, jdouble cx_px, jdouble cy_px, jdoubleArray out_rotation,
+    jdoubleArray out_centre_m) {
+    if (out_rotation == nullptr || out_centre_m == nullptr ||
+        env->GetArrayLength(out_rotation) < 9 || env->GetArrayLength(out_centre_m) < 3) {
+        return 0;
+    }
+    const std::vector<unsigned char> pixels = readGray(env, gray);
+    if (pixels.empty() || width_px <= 0 || height_px <= 0 ||
+        pixels.size() != static_cast<std::size_t>(width_px) * static_cast<std::size_t>(height_px)) {
+        return 0;
+    }
+    double rotation[9] = {};
+    double centre[3] = {};
+    const int inliers = scand3d::bridge::trackerTrack(
+        static_cast<scand3d::bridge::TrackerHandle>(handle), pixels.data(), width_px, height_px,
+        focal_px, cx_px, cy_px, rotation, centre);
+    if (inliers <= 0) {
+        return 0;
+    }
+    env->SetDoubleArrayRegion(out_rotation, 0, 9, rotation);
+    env->SetDoubleArrayRegion(out_centre_m, 0, 3, centre);
+    return inliers;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeTrackerDestroy(JNIEnv* /*env*/, jobject /*instance*/,
+                                                            jlong handle) {
+    scand3d::bridge::trackerDestroy(static_cast<scand3d::bridge::TrackerHandle>(handle));
+}
+
+extern "C" JNIEXPORT jlong JNICALL
 Java_com_scand3d_core_bridge_NativeCore_nativeOverlayCreate(JNIEnv* /*env*/, jobject /*instance*/) {
     return static_cast<jlong>(scand3d::bridge::overlayCreate());
 }

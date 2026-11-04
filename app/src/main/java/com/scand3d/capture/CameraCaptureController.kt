@@ -21,6 +21,7 @@ import android.media.ExifInterface
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.SystemClock
 import android.util.Log
 import android.util.Range
 import android.util.Size
@@ -51,6 +52,9 @@ class CameraCaptureController(
         fun onPreviewStats(fps: Float, frame: FrameRecord)
         fun onLocked(settings: LockedCaptureSettings)
         fun onFrameSaved(savedFrameCount: Int, frame: FrameRecord)
+
+        /** One downscaled gray preview frame for tracking; at most [ANALYSIS_INTERVAL_MS] apart. */
+        fun onAnalysisFrame(width_px: Int, height_px: Int, gray: ByteArray)
         fun onCameraLost(reason: String)
         fun onFailure(message: String)
     }
@@ -63,6 +67,9 @@ class CameraCaptureController(
 
     val previewSizePx: Size
     val stillSizePx: Size
+
+    /** Gray analysis stream the tracker matches against; 0x0 when the camera has no YUV sizes. */
+    val analysisSizePx: Size
 
     /** Camera2's timestamp source: "realtime" means the same clock as the sensors. */
     val cameraClockSource: String
@@ -84,6 +91,8 @@ class CameraCaptureController(
     private var deviceStateCallback: CameraDevice.StateCallback? = null
     private var captureSession: CameraCaptureSession? = null
     private var imageReader: ImageReader? = null
+    private var analysisReader: ImageReader? = null
+    private var lastAnalysisMs = 0L
     private var previewSurface: Surface? = null
     private var lockedSettings: LockedCaptureSettings? = null
     private var pendingStill: FrameRecord? = null
@@ -109,6 +118,7 @@ class CameraCaptureController(
         var resolvedId: String? = null
         var preview = Size(1280, 720)
         var still = Size(1920, 1080)
+        var analysis = Size(0, 0)
         var orientation = 90
         var fps: Range<Int>? = null
         var clockSource = "unknown"
@@ -125,6 +135,8 @@ class CameraCaptureController(
             } else {
                 preview = choosePreviewSize(map.getOutputSizes(SurfaceTexture::class.java) ?: emptyArray())
                 still = chooseStillSize(map.getOutputSizes(ImageFormat.JPEG) ?: emptyArray())
+                // Tracking needs a small gray stream; the full-resolution stills are for the map.
+                analysis = chooseAnalysisSize(map.getOutputSizes(ImageFormat.YUV_420_888) ?: emptyArray())
                 fps = chooseFpsRange(characteristics)
             }
             orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
@@ -150,6 +162,7 @@ class CameraCaptureController(
         cameraId = resolvedId
         previewSizePx = preview
         stillSizePx = still
+        analysisSizePx = analysis
         sensorOrientationDeg = orientation
         fpsRange = fps
         cameraClockSource = clockSource
@@ -198,6 +211,21 @@ class CameraCaptureController(
             reader.setOnImageAvailableListener({ onJpegAvailable(it) }, cameraHandler)
         }
 
+        // The analysis stream is an extra output, so a camera that cannot provide one simply runs
+        // without tracking rather than failing the session.
+        analysisReader = analysisSizePx
+            .takeIf { it.width > 0 && it.height > 0 }
+            ?.let { size ->
+                ImageReader.newInstance(
+                    size.width,
+                    size.height,
+                    ImageFormat.YUV_420_888,
+                    ANALYSIS_BUFFERS,
+                ).also { reader ->
+                    reader.setOnImageAvailableListener({ onAnalysisAvailable(it) }, cameraHandler)
+                }
+            }
+
         try {
             val callback = object : CameraDevice.StateCallback() {
                 override fun onOpened(device: CameraDevice) {
@@ -233,9 +261,11 @@ class CameraCaptureController(
         runCatching { captureSession?.close() }
         runCatching { device?.close() }
         runCatching { imageReader?.close() }
+        runCatching { analysisReader?.close() }
         captureSession = null
         cameraDevice = null
         imageReader = null
+        analysisReader = null
         previewSurface = null
         deviceStateCallback = null
         cameraThread?.quitSafely()
@@ -315,9 +345,11 @@ class CameraCaptureController(
             runCatching { captureSession?.close() }
             runCatching { cameraDevice?.close() }
             runCatching { imageReader?.close() }
+            runCatching { analysisReader?.close() }
             captureSession = null
             cameraDevice = null
             imageReader = null
+            analysisReader = null
             previewSurface = null
             deviceStateCallback = null
             thread?.quitSafely()
@@ -360,6 +392,16 @@ class CameraCaptureController(
     private fun chooseStillSize(sizes: Array<Size>): Size =
         sizes.maxByOrNull { it.width.toLong() * it.height } ?: Size(1920, 1080)
 
+    private fun chooseAnalysisSize(sizes: Array<Size>): Size {
+        // Tracking matches features, so 640 px is plenty and keeps the per-frame cost small; 4:3
+        // matches the preview and the stills, so the intrinsics scale without a crop.
+        sizes.firstOrNull { it.width == 640 && it.height == 480 }?.let { return it }
+        sizes.filter { it.width * 3 == it.height * 4 && it.width in 320..1280 }
+            .maxByOrNull { it.width * it.height }
+            ?.let { return it }
+        return sizes.minByOrNull { it.width * it.height } ?: Size(0, 0)
+    }
+
     private fun chooseFpsRange(characteristics: CameraCharacteristics): Range<Int>? {
         val ranges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
             ?: return null
@@ -372,10 +414,11 @@ class CameraCaptureController(
         val preview = previewSurface ?: return
         val reader = imageReader ?: return
 
-        val outputs = listOf(
+        val outputs = mutableListOf(
             OutputConfiguration(preview),
             OutputConfiguration(reader.surface),
         )
+        analysisReader?.let { outputs.add(OutputConfiguration(it.surface)) }
         val executor = Executor { command -> handler?.post(command) }
         val configuration = SessionConfiguration(
             SessionConfiguration.SESSION_REGULAR,
@@ -401,6 +444,9 @@ class CameraCaptureController(
         val preview = previewSurface ?: return
         val request = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW) ?: return
         request.addTarget(preview)
+        // A surface the session knows but no request targets never receives a frame, so the
+        // analysis stream has to be a target of every repeating preview request (D051).
+        analysisReader?.let { request.addTarget(it.surface) }
         fpsRange?.let { request.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
         request.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
         request.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
@@ -500,6 +546,9 @@ class CameraCaptureController(
         val preview = previewSurface ?: return
         val request = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW) ?: return
         request.addTarget(preview)
+        // A surface the session knows but no request targets never receives a frame, so the
+        // analysis stream has to be a target of every repeating preview request (D051).
+        analysisReader?.let { request.addTarget(it.surface) }
         fpsRange?.let { request.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
         applySettings(request, settings)
         runCatching { session.setRepeatingRequest(request.build(), previewCallback, handler) }
@@ -585,6 +634,44 @@ class CameraCaptureController(
         // Deciding, downscaling and writing run off the camera thread: done inline they dropped the
         // preview to a few frames per second while a burst was running.
         fileWriter.execute { persistStill(bytes, metadata, timestamp) }
+    }
+
+    /**
+     * Copies the luma plane of one analysis frame. The plane is row-padded, so each row is copied
+     * on its own; handing the padded buffer to the matcher would shear every feature position.
+     */
+    private fun onAnalysisAvailable(reader: ImageReader) {
+        val image = runCatching { reader.acquireNextImage() }.getOrNull() ?: return
+        try {
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastAnalysisMs < ANALYSIS_INTERVAL_MS) {
+                return
+            }
+            lastAnalysisMs = now
+
+            val plane = image.planes[0]
+            val width = image.width
+            val height = image.height
+            val row_stride = plane.rowStride
+            val buffer = plane.buffer
+            if (width <= 0 || height <= 0 || row_stride < width) {
+                return
+            }
+            val gray = ByteArray(width * height)
+            for (row in 0 until height) {
+                val offset = row * row_stride
+                if (offset + width > buffer.limit()) {
+                    break
+                }
+                buffer.position(offset)
+                buffer.get(gray, row * width, width)
+            }
+            listener.onAnalysisFrame(width, height, gray)
+        } catch (t: Throwable) {
+            Log.w(LOG_TAG, "analysis frame failed", t)
+        } finally {
+            image.close()
+        }
     }
 
     /**
@@ -753,6 +840,10 @@ class CameraCaptureController(
         const val LOG_TAG = "CameraCapture"
         const val RING_BUFFER_CAPACITY = 120
         const val IMAGE_READER_BUFFERS = 3
+        const val ANALYSIS_BUFFERS = 2
+
+        /** 10 Hz is the most tracking needs; the preview runs at 30. */
+        const val ANALYSIS_INTERVAL_MS = 100L
         const val WARM_UP_FRAMES = 45
         const val MAX_WARM_UP_FRAMES = 240
         const val FPS_WINDOW_NS = 1_000_000_000L

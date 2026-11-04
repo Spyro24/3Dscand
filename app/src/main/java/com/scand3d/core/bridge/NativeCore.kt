@@ -141,6 +141,53 @@ object NativeCore {
             0
         }
 
+    /**
+     * Tracks a gray frame against a map snapshot (roadmap 5.2, D051): the snapshot keeps tracking
+     * off the reconstruction lock, so a preview frame never waits behind a map run.
+     */
+    fun trackerTrack(
+        handle: Long,
+        gray: ByteArray,
+        width_px: Int,
+        height_px: Int,
+        focal_px: Double,
+        cx_px: Double,
+        cy_px: Double,
+        out_rotation: DoubleArray,
+        out_centre_m: DoubleArray,
+    ): Int =
+        if (isLoaded && handle != 0L && width_px > 0 && height_px > 0 &&
+            gray.size == width_px * height_px && out_rotation.size == 9 && out_centre_m.size == 3
+        ) {
+            nativeTrackerTrack(
+                handle,
+                gray,
+                width_px,
+                height_px,
+                focal_px,
+                cx_px,
+                cy_px,
+                out_rotation,
+                out_centre_m,
+            )
+        } else {
+            0
+        }
+
+    /** Copies a live map into a tracker; 0 when the handle is unknown or the map is empty. */
+    fun trackerCreate(reconstruction_handle: Long): Long =
+        if (isLoaded && reconstruction_handle != 0L) {
+            nativeTrackerCreate(reconstruction_handle)
+        } else {
+            0L
+        }
+
+    fun trackerDestroy(handle: Long) {
+        if (isLoaded && handle != 0L) {
+            nativeTrackerDestroy(handle)
+        }
+    }
+
     /** Copies one placed view's pose after a run; false when that view was not registered. */
     fun reconstructionCopyCamera(
         handle: Long,
@@ -369,6 +416,22 @@ object NativeCore {
         out_rotation: DoubleArray,
         out_centre_m: DoubleArray,
     ): Int
+
+    private external fun nativeTrackerCreate(reconstruction_handle: Long): Long
+
+    private external fun nativeTrackerTrack(
+        handle: Long,
+        gray: ByteArray,
+        width_px: Int,
+        height_px: Int,
+        focal_px: Double,
+        cx_px: Double,
+        cy_px: Double,
+        out_rotation: DoubleArray,
+        out_centre_m: DoubleArray,
+    ): Int
+
+    private external fun nativeTrackerDestroy(handle: Long)
 
     private external fun nativeOverlayCreate(): Long
 

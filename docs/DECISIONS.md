@@ -721,3 +721,27 @@ here with its version, license and reason (agents.md sections 2 and 7).
   capture loop stops taking stills at the cap while the preview keeps running until the user stops.
   Nothing is deleted: old sessions stay until the user removes them (agents.md section 8), so disk
   use still grows by one bounded session per scan.
+
+## D051 - the overlay camera follows a tracked pose, not just the gyro
+
+- **Decision:** the camera session carries a small `YUV_420_888` analysis stream (640x480, 10 Hz).
+  Each luma frame is matched against a snapshot of the live sparse map (`sfm::Tracker`, built by
+  `Session::snapshot` and exposed as `trackerCreate/trackerTrack/trackerDestroy`), PnP gives the
+  camera pose in the map frame, and the overlay camera uses it: `rotation = basis * R_map`,
+  `centre_m = scale * basis * C_map`, with the same basis and scale the cloud was given in
+  `toOverlayFrame`. Until a frame registers, the earlier rotation-only IMU camera stays in use.
+- **Reason:** the overlay camera had no translation (`centre_m = ZERO_CENTRE_M`) and no measurement
+  of the camera at all, so the cloud only stayed glued to the object while the phone rotated in
+  place; walking around it slid the cloud off. `Session::trackPose` already existed and was tested
+  but nothing called it, and calling it on the session directly would block behind map runs, which
+  take seconds and hold the reconstruction lock - hence the immutable snapshot with its own lock.
+- **Verified:** `Session.SnapshotTracksIndependentlyOfLaterRuns` (the snapshot tracks a rendered
+  view with more than ten inliers, returns the identical pose after the session runs again, and
+  refuses a blank frame) and `Session.EmptySnapshotRefusesToTrack`; `OverlayTrackingTest` checks
+  that the basis/scale mapping projects a map point exactly where the map's own camera would. The
+  existing `Session.TracksAViewAgainstTheMap` still passes through the same code path, because
+  `Session::trackPose` now delegates to the snapshot.
+- **Consequence:** tracking quality is bounded by the live map: a phone that never produces
+  keyframes gets no tracked pose and keeps the IMU fallback. A pose older than 600 ms is treated as
+  stale, so a lost track falls back instead of showing a confidently wrong overlay. Alignment to a
+  real object (roadmap 5.5, about 10 px after 10 s of motion) still needs a device measurement.

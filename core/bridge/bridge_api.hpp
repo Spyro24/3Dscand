@@ -96,6 +96,30 @@ int reconstructionTrackPose(
     double out_rotation[9],
     double out_centre_m[3]);
 
+/// Opaque handle to one immutable map snapshot, used to track live frames (D051).
+using TrackerHandle = std::uint64_t;
+
+/// Copies a session's current map into a tracker. Tracking then runs without the reconstruction
+/// lock, so a preview frame does not wait the seconds a map run takes. Returns 0 for an unknown
+/// handle or a session that holds no views.
+TrackerHandle trackerCreate(ReconstructionHandle handle);
+
+/// Tracks a gray frame against the snapshot by PnP. Returns the inlier count, 0 when the frame did
+/// not register; the pose is written only on success.
+int trackerTrack(
+    TrackerHandle handle,
+    const unsigned char* gray,
+    int width_px,
+    int height_px,
+    double focal_px,
+    double cx_px,
+    double cy_px,
+    double out_rotation[9],
+    double out_centre_m[3]);
+
+/// Frees a snapshot. Destroying an unknown or already-destroyed handle is a no-op.
+void trackerDestroy(TrackerHandle handle);
+
 /// Opaque handle to one dense session: posed gray views in, fused point cloud out (roadmap 6.1-6.5).
 using DenseHandle = std::uint64_t;
 

@@ -59,6 +59,7 @@ add_library(scand3d_test_util STATIC
     "${SCAND3D_CORE_DIR}/sfm/pose.cpp"
     "${SCAND3D_CORE_DIR}/sfm/report.cpp"
     "${SCAND3D_CORE_DIR}/sfm/session.cpp"
+    "${SCAND3D_CORE_DIR}/sfm/tracker.cpp"
     "${SCAND3D_CORE_DIR}/sfm/triangulation.cpp"
     synthetic/sfm_scan.cpp
     synthetic/synthetic_scene.cpp
