@@ -9,6 +9,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include "feature/gray_image.hpp"
+#include "geometry/linalg.hpp"
+#include "mvs/pipeline.hpp"
 #include "overlay/overlay_scene.hpp"
 #include "overlay/point_color.hpp"
 #include "sfm/session.hpp"
@@ -452,6 +455,202 @@ int overlaySampleColors(
         it->second.setPoints(std::move(points));
     }
     return sampled;
+}
+
+namespace {
+
+/// One dense session (roadmap 6). The run itself can take minutes, so the views, the cancel flag
+/// and the progress live in a shared state that is reachable without the global handle lock: that
+/// is what lets `denseCancel` and `denseProgress` answer while `denseRun` blocks.
+struct DenseState {
+    std::mutex views_mutex;
+    std::vector<mvs::MvsViewInput> views;
+    std::vector<geometry::Vec3> hints;
+    std::vector<mvs::FusedPoint> points;
+    std::atomic<bool> cancel{false};
+    std::atomic<double> progress{0.0};
+    std::mutex run_mutex;
+};
+
+std::mutex g_dense_mutex;
+std::unordered_map<DenseHandle, std::shared_ptr<DenseState>> g_dense_sessions;
+std::atomic<DenseHandle> g_next_dense_handle{1};
+
+std::shared_ptr<DenseState> denseStateOf(DenseHandle handle) {
+    std::lock_guard<std::mutex> lock(g_dense_mutex);
+    const auto found = g_dense_sessions.find(handle);
+    return found == g_dense_sessions.end() ? nullptr : found->second;
+}
+
+}  // namespace
+
+DenseHandle denseCreate() {
+    const DenseHandle handle = g_next_dense_handle.fetch_add(1);
+    auto state = std::make_shared<DenseState>();
+    std::lock_guard<std::mutex> lock(g_dense_mutex);
+    g_dense_sessions.emplace(handle, std::move(state));
+    return handle;
+}
+
+void denseDestroy(DenseHandle handle) {
+    std::shared_ptr<DenseState> state;
+    {
+        std::lock_guard<std::mutex> lock(g_dense_mutex);
+        const auto found = g_dense_sessions.find(handle);
+        if (found == g_dense_sessions.end()) {
+            return;
+        }
+        state = found->second;
+        g_dense_sessions.erase(found);
+    }
+    // A run that is still going without its entry must stop instead of finishing into nothing.
+    state->cancel.store(true);
+}
+
+int denseAddView(
+    DenseHandle handle,
+    const unsigned char* gray,
+    int width_px,
+    int height_px,
+    double focal_px,
+    double cx_px,
+    double cy_px,
+    const double rotation[9],
+    const double centre_m[3]) {
+    if (gray == nullptr || rotation == nullptr || centre_m == nullptr || width_px <= 0 ||
+        height_px <= 0 || !(focal_px > 0.0)) {
+        return -1;
+    }
+    const std::shared_ptr<DenseState> state = denseStateOf(handle);
+    if (state == nullptr) {
+        return -1;
+    }
+
+    mvs::MvsViewInput view;
+    view.gray.width_px = width_px;
+    view.gray.height_px = height_px;
+    const std::size_t pixel_count =
+        static_cast<std::size_t>(width_px) * static_cast<std::size_t>(height_px);
+    view.gray.pixels.assign(gray, gray + pixel_count);
+    view.camera = mvs::CameraModel{focal_px, cx_px, cy_px};
+    for (int i = 0; i < 9; ++i) {
+        view.pose.rotation[static_cast<std::size_t>(i)] = rotation[i];
+    }
+    for (int i = 0; i < 3; ++i) {
+        view.pose.camera_centre_m[static_cast<std::size_t>(i)] = centre_m[i];
+    }
+
+    std::lock_guard<std::mutex> lock(state->views_mutex);
+    state->views.push_back(std::move(view));
+    return static_cast<int>(state->views.size()) - 1;
+}
+
+void denseSetHints(DenseHandle handle, const double* positions_m, int count) {
+    const std::shared_ptr<DenseState> state = denseStateOf(handle);
+    if (state == nullptr || count < 0 || (count > 0 && positions_m == nullptr)) {
+        return;
+    }
+    std::vector<geometry::Vec3> hints;
+    hints.reserve(static_cast<std::size_t>(count));
+    for (int i = 0; i < count; ++i) {
+        const double* point = positions_m + static_cast<std::ptrdiff_t>(i) * 3;
+        if (!std::isfinite(point[0]) || !std::isfinite(point[1]) || !std::isfinite(point[2])) {
+            continue;
+        }
+        hints.push_back(geometry::Vec3{point[0], point[1], point[2]});
+    }
+    std::lock_guard<std::mutex> lock(state->views_mutex);
+    state->hints = std::move(hints);
+}
+
+int denseRun(
+    DenseHandle handle,
+    int working_width_px,
+    double min_depth_m,
+    double max_depth_m) {
+    const std::shared_ptr<DenseState> state = denseStateOf(handle);
+    if (state == nullptr) {
+        return -1;
+    }
+    std::lock_guard<std::mutex> run_lock(state->run_mutex);
+    state->cancel.store(false);
+    state->progress.store(0.0);
+
+    std::vector<mvs::MvsViewInput> views;
+    std::vector<geometry::Vec3> hints;
+    {
+        std::lock_guard<std::mutex> lock(state->views_mutex);
+        views = state->views;
+        hints = state->hints;
+    }
+    if (views.size() < 2) {
+        state->progress.store(1.0);
+        return 0;
+    }
+
+    mvs::MvsOptions options;
+    options.working_width_px = working_width_px > 0 ? working_width_px : 320;
+    if (min_depth_m > 0.0 && max_depth_m > min_depth_m) {
+        options.patch_match.min_depth_m = min_depth_m;
+        options.patch_match.max_depth_m = max_depth_m;
+    }
+    options.depth_hint_points_m = std::move(hints);
+
+    mvs::MvsControl control;
+    control.cancel = &state->cancel;
+    control.progress = [&state](double fraction) { state->progress.store(fraction); };
+
+    const mvs::MvsResult result = mvs::reconstructDense(views, options, control);
+    if (result.cancelled) {
+        state->progress.store(0.0);
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> lock(state->views_mutex);
+    state->points = result.points;
+    state->progress.store(1.0);
+    return static_cast<int>(state->points.size());
+}
+
+int densePointCount(DenseHandle handle) {
+    const std::shared_ptr<DenseState> state = denseStateOf(handle);
+    if (state == nullptr) {
+        return 0;
+    }
+    std::lock_guard<std::mutex> lock(state->views_mutex);
+    return static_cast<int>(state->points.size());
+}
+
+int denseCopyPoints(DenseHandle handle, double* positions_m, int max_points) {
+    if (positions_m == nullptr || max_points <= 0) {
+        return 0;
+    }
+    const std::shared_ptr<DenseState> state = denseStateOf(handle);
+    if (state == nullptr) {
+        return 0;
+    }
+    std::lock_guard<std::mutex> lock(state->views_mutex);
+    const int written =
+        std::min(static_cast<int>(state->points.size()), max_points);
+    for (int i = 0; i < written; ++i) {
+        const mvs::FusedPoint& point = state->points[static_cast<std::size_t>(i)];
+        for (int axis = 0; axis < 3; ++axis) {
+            positions_m[3 * i + axis] = point.position_m[static_cast<std::size_t>(axis)];
+        }
+    }
+    return written;
+}
+
+double denseProgress(DenseHandle handle) {
+    const std::shared_ptr<DenseState> state = denseStateOf(handle);
+    return state == nullptr ? 0.0 : state->progress.load();
+}
+
+void denseCancel(DenseHandle handle) {
+    const std::shared_ptr<DenseState> state = denseStateOf(handle);
+    if (state != nullptr) {
+        state->cancel.store(true);
+    }
 }
 
 }  // namespace scand3d::bridge

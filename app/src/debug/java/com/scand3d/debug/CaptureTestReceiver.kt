@@ -38,6 +38,11 @@ class CaptureTestReceiver : BroadcastReceiver() {
                 Log.i(LOG_TAG, "reconstruct requested")
             }
 
+            DENSE -> {
+                actions.runDensePass()
+                Log.i(LOG_TAG, "dense pass requested")
+            }
+
             OVERLAY -> {
                 val enabled = intent.getStringExtra(VALUE) == "on"
                 actions.setOverlayDemo(enabled)
@@ -63,6 +68,7 @@ class CaptureTestReceiver : BroadcastReceiver() {
         const val LOSS = "loss"
         const val OVERLAY = "overlay"
         const val RECONSTRUCT = "reconstruct"
+        const val DENSE = "dense"
         const val ORIENTATION = "orientation"
     }
 }

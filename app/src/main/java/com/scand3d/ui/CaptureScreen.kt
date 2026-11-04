@@ -63,6 +63,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.scand3d.R
+import com.scand3d.reconstruct.MvsQuality
 import com.scand3d.render.MonochromePreviewRenderer
 import com.scand3d.render.OverlayFeed
 import com.scand3d.sensors.ImuMode
@@ -139,6 +140,8 @@ fun CaptureRoute(viewModel: CaptureViewModel = viewModel()) {
                 onToggleCapture = viewModel::toggleCapture,
                 onOverlayEnabledChange = viewModel::setOverlayEnabled,
                 onOverlayOpacityChange = viewModel::setOverlayOpacity,
+                onDenseEnabledChange = viewModel::setDenseEnabled,
+                onDenseQualityClick = viewModel::cycleDenseQuality,
             )
         }
     }
@@ -151,6 +154,8 @@ private fun CameraScreen(
     onToggleCapture: () -> Unit,
     onOverlayEnabledChange: (Boolean) -> Unit,
     onOverlayOpacityChange: (Float) -> Unit,
+    onDenseEnabledChange: (Boolean) -> Unit,
+    onDenseQualityClick: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         Box(
@@ -174,6 +179,11 @@ private fun CameraScreen(
         }
 
         ControlStrip(state = state, onOverlayEnabledChange = onOverlayEnabledChange)
+        DenseRow(
+            state = state,
+            onDenseEnabledChange = onDenseEnabledChange,
+            onDenseQualityClick = onDenseQualityClick,
+        )
         if (state.overlayEnabled) {
             OpacitySlider(state = state, onOverlayOpacityChange = onOverlayOpacityChange)
         }
@@ -225,10 +235,21 @@ private fun StatusLine(state: CaptureUiState, modifier: Modifier = Modifier) {
         null
     }
     val summary = listOfNotNull(fps, frames, views).joinToString("  ·  ")
+    val denseProgress = state.dense_progress
+    val dense = when {
+        denseProgress != null ->
+            stringResource(R.string.capture_status_dense_progress, (denseProgress * 100f).toInt())
+        state.dense_points > 0 ->
+            stringResource(R.string.capture_status_dense_points, state.dense_points)
+        else -> null
+    }
 
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         if (summary.isNotEmpty()) {
             Text(text = summary, color = SECONDARY_TEXT, fontSize = 12.sp)
+        }
+        if (dense != null) {
+            Text(text = dense, color = SECONDARY_TEXT, fontSize = 12.sp)
         }
         if (state.motion == MotionWarning.BlurRisk) {
             Text(
@@ -328,6 +349,57 @@ private fun OverlayToggle(enabled: Boolean, onChange: (Boolean) -> Unit) {
                 }
             }
         }
+    }
+}
+
+/** Dense stage controls (roadmap 6): the preset that sets the working width, and its toggle. */
+@Composable
+private fun DenseRow(
+    state: CaptureUiState,
+    onDenseEnabledChange: (Boolean) -> Unit,
+    onDenseQualityClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 30.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DenseQualityPill(state.denseQuality, onDenseQualityClick)
+        DenseToggle(enabled = state.denseEnabled, onChange = onDenseEnabledChange)
+    }
+}
+
+@Composable
+private fun DenseQualityPill(quality: MvsQuality, onClick: () -> Unit) {
+    val label = stringResource(quality.label_res)
+    val description = stringResource(R.string.dense_quality_content_description, label)
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(PANEL_COLOR)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+            .semantics { contentDescription = description },
+    ) {
+        Text(text = label, color = Color.White, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun DenseToggle(enabled: Boolean, onChange: (Boolean) -> Unit) {
+    val label = stringResource(R.string.dense_toggle_label)
+    val tint = if (enabled) Color.White else Color(0x66FFFFFF)
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (enabled) SHUTTER_COLOR else PANEL_COLOR)
+            .border(1.dp, tint, RoundedCornerShape(10.dp))
+            .clickable(role = Role.Switch) { onChange(!enabled) }
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text = "3D", color = tint, fontSize = 13.sp, fontWeight = FontWeight.Bold)
     }
 }
 

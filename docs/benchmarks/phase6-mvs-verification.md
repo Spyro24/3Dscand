@@ -95,7 +95,8 @@ Nine gtest cases in `tests/native/mvs_test.cpp`:
   still fuses a cloud on the object.
 
 `mvs_test` runs in 63 s; the whole `nativeTest` target takes 236 s, most of it the older
-synthetic scenes.
+synthetic scenes. `BridgeApi.DenseRunFusesPosedViews` covers the same stage through the C API the
+app calls: 8 views at 120 px, more than 100 fused points and progress reaching 1.0.
 
 ## Not measured or not implemented
 
@@ -105,9 +106,10 @@ synthetic scenes.
   therefore a host number, not a device guarantee.
 - **A real capture.** Only the synthetic box has been through the dense stage. Real JPEG keyframes
   are decoded and posed by Phase 4, but the dense stage has not been pointed at them.
-- **App wiring.** `mvs::reconstructDense` is core-only: no JNI entry point and no UI path exists
-  yet, so the app still draws the sparse map. Wiring it is a public-interface change and was not
-  made (agents.md rule 5).
+- **The app path is built but not run.** The bridge exposes a dense session and the capture screen
+  has a "3D" toggle with a Draft/Normal/High preset (D049). It compiles, the bridge has a host test,
+  and the JVM tests pass, but nothing has been installed on the SM-G930F, so no phone timing or
+  phone-side result exists.
 - **Colour.** Fusion stores one gray value per point; the core only ever sees gray images. Colour
   would come from the app-side keyframe sampler that already colours the overlay (D033), not from
   the core.

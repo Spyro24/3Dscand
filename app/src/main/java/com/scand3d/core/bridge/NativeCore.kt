@@ -141,6 +141,98 @@ object NativeCore {
             0
         }
 
+    /** Copies one placed view's pose after a run; false when that view was not registered. */
+    fun reconstructionCopyCamera(
+        handle: Long,
+        index: Int,
+        out_rotation: DoubleArray,
+        out_centre_m: DoubleArray,
+    ): Boolean =
+        isLoaded &&
+            handle != 0L &&
+            index >= 0 &&
+            out_rotation.size == 9 &&
+            out_centre_m.size == 3 &&
+            nativeReconstructionCopyCamera(handle, index, out_rotation, out_centre_m)
+
+    /**
+     * Dense stage (roadmap 6): posed gray views in, fused cloud out. [denseRun] blocks for as long
+     * as the pass takes; [denseProgress] and [denseCancel] answer from another thread.
+     */
+    fun denseCreate(): Long = if (isLoaded) nativeDenseCreate() else 0L
+
+    fun denseDestroy(handle: Long) {
+        if (isLoaded && handle != 0L) nativeDenseDestroy(handle)
+    }
+
+    /** Adds one posed view; returns its index, or -1. */
+    fun denseAddView(
+        handle: Long,
+        gray: ByteArray,
+        width_px: Int,
+        height_px: Int,
+        focal_px: Double,
+        cx_px: Double,
+        cy_px: Double,
+        rotation: DoubleArray,
+        centre_m: DoubleArray,
+    ): Int =
+        if (isLoaded && handle != 0L && width_px > 0 && height_px > 0 &&
+            gray.size == width_px * height_px && rotation.size == 9 && centre_m.size == 3
+        ) {
+            nativeDenseAddView(
+                handle,
+                gray,
+                width_px,
+                height_px,
+                focal_px,
+                cx_px,
+                cy_px,
+                rotation,
+                centre_m,
+            )
+        } else {
+            -1
+        }
+
+    /** Sparse points that narrow the depth search; they and the view poses share one frame. */
+    fun denseSetHints(handle: Long, positions_m: DoubleArray) {
+        if (isLoaded && handle != 0L && positions_m.size % 3 == 0) {
+            nativeDenseSetHints(handle, positions_m)
+        }
+    }
+
+    /** Runs the dense stage; returns the fused point count, 0 when cancelled. Blocks. */
+    fun denseRun(
+        handle: Long,
+        working_width_px: Int,
+        min_depth_m: Double,
+        max_depth_m: Double,
+    ): Int =
+        if (isLoaded && handle != 0L && working_width_px > 0) {
+            nativeDenseRun(handle, working_width_px, min_depth_m, max_depth_m)
+        } else {
+            0
+        }
+
+    fun densePointCount(handle: Long): Int =
+        if (isLoaded && handle != 0L) nativeDensePointCount(handle) else 0
+
+    /** Fills `out_positions` with xyz triples; returns how many points were written. */
+    fun denseCopyPoints(handle: Long, out_positions: DoubleArray): Int =
+        if (isLoaded && handle != 0L && out_positions.size >= 3) {
+            nativeDenseCopyPoints(handle, out_positions)
+        } else {
+            0
+        }
+
+    fun denseProgress(handle: Long): Double =
+        if (isLoaded && handle != 0L) nativeDenseProgress(handle) else 0.0
+
+    fun denseCancel(handle: Long) {
+        if (isLoaded && handle != 0L) nativeDenseCancel(handle)
+    }
+
     /** Floats per overlay vertex: {x_ndc, y_ndc, r, g, b}; mirrors kOverlayVertexValueCount. */
     const val OVERLAY_VERTEX_VALUE_COUNT = 5
 
@@ -313,4 +405,44 @@ object NativeCore {
         image_height_px: Int,
         out: FloatArray,
     ): Int
+
+    private external fun nativeReconstructionCopyCamera(
+        handle: Long,
+        index: Int,
+        out_rotation: DoubleArray,
+        out_centre_m: DoubleArray,
+    ): Boolean
+
+    private external fun nativeDenseCreate(): Long
+
+    private external fun nativeDenseDestroy(handle: Long)
+
+    private external fun nativeDenseAddView(
+        handle: Long,
+        gray: ByteArray,
+        width_px: Int,
+        height_px: Int,
+        focal_px: Double,
+        cx_px: Double,
+        cy_px: Double,
+        rotation: DoubleArray,
+        centre_m: DoubleArray,
+    ): Int
+
+    private external fun nativeDenseSetHints(handle: Long, positions_m: DoubleArray)
+
+    private external fun nativeDenseRun(
+        handle: Long,
+        working_width_px: Int,
+        min_depth_m: Double,
+        max_depth_m: Double,
+    ): Int
+
+    private external fun nativeDensePointCount(handle: Long): Int
+
+    private external fun nativeDenseCopyPoints(handle: Long, out_positions: DoubleArray): Int
+
+    private external fun nativeDenseProgress(handle: Long): Double
+
+    private external fun nativeDenseCancel(handle: Long)
 }

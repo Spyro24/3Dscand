@@ -96,6 +96,53 @@ int reconstructionTrackPose(
     double out_rotation[9],
     double out_centre_m[3]);
 
+/// Opaque handle to one dense session: posed gray views in, fused point cloud out (roadmap 6.1-6.5).
+using DenseHandle = std::uint64_t;
+
+/// Opens an empty dense session. The caller owns the handle.
+DenseHandle denseCreate();
+
+/// Frees a session. Destroying an unknown or already-destroyed handle is a no-op.
+void denseDestroy(DenseHandle handle);
+
+/// Adds one view at the resolution of `gray`: intrinsics for those pixels and the camera-to-world
+/// pose the sparse stage estimated (`rotation` row-major 3x3, `centre_m`). Returns its index, or -1
+/// when the input is unusable. Views from a reconstruction that did not register are not added.
+int denseAddView(
+    DenseHandle handle,
+    const unsigned char* gray,
+    int width_px,
+    int height_px,
+    double focal_px,
+    double cx_px,
+    double cy_px,
+    const double rotation[9],
+    const double centre_m[3]);
+
+/// Sparse map points, in the same frame as the view poses, that narrow the depth search to the
+/// range the reconstruction occupies. Replaces any earlier hints; may be empty.
+void denseSetHints(DenseHandle handle, const double* positions_m, int count);
+
+/// Runs the dense stage at `working_width_px` (roadmap 6.4). Views whose hints leave the search
+/// empty fall back to [min_depth_m, max_depth_m]. Returns the fused point count, 0 when the run was
+/// cancelled or produced nothing, -1 for an unknown handle. Blocking.
+int denseRun(
+    DenseHandle handle,
+    int working_width_px,
+    double min_depth_m,
+    double max_depth_m);
+
+int densePointCount(DenseHandle handle);
+
+/// Writes points as xyz into `positions_m`; returns how many were written.
+int denseCopyPoints(DenseHandle handle, double* positions_m, int max_points);
+
+/// Progress of the current or last run, 0..1 (roadmap 6.5). Readable while `denseRun` blocks.
+double denseProgress(DenseHandle handle);
+
+/// Asks the running dense stage to stop; the run then returns 0 and publishes no cloud.
+void denseCancel(DenseHandle handle);
+
 /// Floats per vertex written by overlayProject: {x_ndc, y_ndc, r, g, b} (roadmap 5.1).
 constexpr int kOverlayVertexValueCount = 5;
 

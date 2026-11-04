@@ -18,7 +18,9 @@ import com.scand3d.core.bridge.NativeCore
 import com.scand3d.core.bridge.NativeOrientationMath
 import com.scand3d.debug.CaptureTestBridge
 import com.scand3d.reconstruct.CloudPlyWriter
+import com.scand3d.reconstruct.DenseRequest
 import com.scand3d.reconstruct.LiveReconstruction
+import com.scand3d.reconstruct.MvsQuality
 import com.scand3d.reconstruct.ReconstructionRunner
 import com.scand3d.render.MonochromePreviewRenderer
 import com.scand3d.render.OverlayCameraParams
@@ -68,6 +70,7 @@ class CaptureViewModel(application: Application) :
     private var recorder: ImuFrameAnnotator? = null
     private var benchmark: BenchmarkRecorder? = null
     private var liveReconstruction: LiveReconstruction? = null
+    private var denseRunner: ReconstructionRunner? = null
     private var savedFrameIndex = 0
     private var memoryTick = 0
     private var overlayHandle = 0L
@@ -177,6 +180,8 @@ class CaptureViewModel(application: Application) :
         // The keyframes are reconstructed as they arrive, so the map on screen during the scan is
         // this capture's own (roadmap 5.2) rather than something a debug command builds afterwards.
         liveReconstruction?.close()
+        // A dense pass on the previous scan would compete with this capture's live map.
+        denseRunner?.cancel()
         liveReconstruction = LiveReconstruction(
             on_cloud = { points, reference -> applyReconstruction(points, reference) },
         )
@@ -202,6 +207,10 @@ class CaptureViewModel(application: Application) :
             phase = CapturePhase.Locked,
             message = _state.value.sessionRelativePath,
         )
+        if (_state.value.denseEnabled) {
+            // The dense stage reads the finished session from disk, so it starts after the stop.
+            runDensePass()
+        }
     }
 
     override fun savedFrames(): Int = _state.value.savedFrames
@@ -252,6 +261,89 @@ class CaptureViewModel(application: Application) :
         OverlayFeed.setStyle(_state.value.overlayEnabled, clamped)
     }
 
+    /** UI: give a finished capture a dense pass (roadmap 6). */
+    fun setDenseEnabled(enabled: Boolean) {
+        _state.value = _state.value.copy(denseEnabled = enabled)
+        if (!enabled) {
+            denseRunner?.cancel()
+            denseRunner = null
+            _state.value = _state.value.copy(dense_progress = null)
+        }
+    }
+
+    /** UI: Draft -> Normal -> High, the working width of the dense pass (roadmap 6.4). */
+    fun cycleDenseQuality() {
+        _state.value = _state.value.copy(denseQuality = _state.value.denseQuality.next())
+    }
+
+    /**
+     * Runs the dense stage on the newest saved session: the sparse pass places the views, then
+     * PatchMatch depth, the consistency filter and fusion produce a cloud that replaces the overlay
+     * (roadmap 6). Wired to the stop path and to the debug receiver.
+     */
+    override fun runDensePass() {
+        val frames = latestSessionFrames(MAX_DENSE_FRAMES)
+        val camera = overlayCameraParams()
+        if (frames.isEmpty() || camera == null) {
+            Log.w(LOG_TAG, "dense: ${frames.size} frames, camera=${camera != null}")
+            return
+        }
+        val quality = _state.value.denseQuality
+        // One pass at a time: the new one replaces whatever was still running on the old scan.
+        denseRunner?.cancel()
+        val runner = ReconstructionRunner()
+        denseRunner = runner
+        _state.value = _state.value.copy(dense_progress = 0f, dense_points = 0)
+        Log.i(
+            LOG_TAG,
+            "dense: ${frames.size} frames at ${quality.name} (${quality.working_width_px} px)",
+        )
+        val worker = Thread(
+            {
+                val outcome = runner.run(
+                    frames,
+                    camera,
+                    dense = DenseRequest(quality.working_width_px),
+                    on_dense_progress = { fraction ->
+                        _state.value = _state.value.copy(dense_progress = fraction.toFloat())
+                    },
+                )
+                if (outcome.cancelled) {
+                    Log.i(LOG_TAG, "dense: cancelled")
+                    _state.value = _state.value.copy(dense_progress = null)
+                    return@Thread
+                }
+                if (outcome.dense_points == 0) {
+                    Log.w(
+                        LOG_TAG,
+                        "dense: ${outcome.registered_views} registered, " +
+                            "${outcome.dense_views} placed views, no points",
+                    )
+                    _state.value = _state.value.copy(dense_progress = null)
+                    return@Thread
+                }
+                // The dense cloud shares the sparse map's frame, so the overlay camera and the
+                // anchoring (D043) carry over unchanged.
+                applyReconstruction(
+                    outcome.dense_positions_m,
+                    source = "dense",
+                    publish_stream = false,
+                )
+                _state.value = _state.value.copy(
+                    dense_progress = null,
+                    dense_points = outcome.dense_points,
+                )
+                Log.i(
+                    LOG_TAG,
+                    "dense: ${outcome.dense_points} points from ${outcome.dense_views} views",
+                )
+            },
+            "dense-reconstruction",
+        )
+        worker.isDaemon = true
+        worker.start()
+    }
+
     /**
      * Reconstructs the newest saved session on a worker thread and loads the cloud into the
      * overlay. This is the app-side path from captured frames to a sparse map that D030 records as
@@ -285,10 +377,15 @@ class CaptureViewModel(application: Application) :
     private fun applyReconstruction(
         positions_m: DoubleArray,
         reference_quaternion: DoubleArray? = null,
+        source: String = "sparse",
+        publish_stream: Boolean = true,
     ) {
         // The Blender add-on polls this file over adb (tools/blender, D044). It is written before
-        // the overlay work so a viewer still gets the map when the preview is not running.
-        publishCloudForStream(positions_m)
+        // the overlay work so a viewer still gets the map when the preview is not running. Only the
+        // sparse map is streamed: that file is the live map the add-on reads.
+        if (publish_stream) {
+            publishCloudForStream(positions_m)
+        }
 
         // The session's first view is the reconstruction's origin, so the overlay is anchored to
         // the pose the phone held when that keyframe was captured, not to this moment (D043).
@@ -301,13 +398,13 @@ class CaptureViewModel(application: Application) :
             overlayHandle = it
         }
         if (handle == 0L) {
-            Log.w(LOG_TAG, "reconstruct: overlay scene unavailable")
+            Log.w(LOG_TAG, "$source: overlay scene unavailable")
             return
         }
 
         // Anchors the overlay pose on first use, which also gives the frame the cloud lives in.
         val camera = overlayCameraParams() ?: run {
-            Log.w(LOG_TAG, "reconstruct: camera intrinsics unavailable")
+            Log.w(LOG_TAG, "$source: camera intrinsics unavailable")
             return
         }
         // Only the first cloud fixes the frame: re-anchoring on every live update would make the
@@ -321,15 +418,15 @@ class CaptureViewModel(application: Application) :
         val world = toOverlayFrame(positions_m, basis)
         val colours = FloatArray(world.size) { 1.0f }
         if (!NativeCore.overlaySetPoints(handle, world, colours)) {
-            Log.w(LOG_TAG, "reconstruct: overlay rejected the cloud")
+            Log.w(LOG_TAG, "$source: overlay rejected the cloud")
             return
         }
         overlayPointCount = world.size / 3
         overlayDemo = true
-        Log.i(LOG_TAG, "reconstruct: ${overlayPointCount} points in the overlay")
+        Log.i(LOG_TAG, "$source: $overlayPointCount points in the overlay")
         sampleKeyframeColors()
         val vertices = publishOverlay()
-        Log.i(LOG_TAG, "reconstruct: $vertices of $overlayPointCount points project into the preview")
+        Log.i(LOG_TAG, "$source: $vertices of $overlayPointCount points project into the preview")
     }
 
     /**
@@ -666,6 +763,8 @@ class CaptureViewModel(application: Application) :
         if (CaptureTestBridge.actions === this) {
             CaptureTestBridge.actions = null
         }
+        denseRunner?.cancel()
+        denseRunner = null
         releaseController()
         closeBenchmark()
         releaseOverlay()
@@ -738,6 +837,9 @@ class CaptureViewModel(application: Application) :
         const val MAX_OVERLAY_VERTICES = 2048
         const val OVERLAY_CLOUD_MEDIAN_M = 0.55
         const val MAX_RECONSTRUCTION_FRAMES = 12
+        // A dense pass costs roughly a second per view on the host at Draft, several on the phone,
+        // so it runs on this many evenly spaced keyframes rather than every frame saved.
+        const val MAX_DENSE_FRAMES = 24
         const val DEMO_POINT_COUNT = 64
         const val DEMO_RING_RADIUS_M = 0.18
         const val DEMO_RING_DISTANCE_M = 1.0

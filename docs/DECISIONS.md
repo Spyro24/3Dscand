@@ -675,3 +675,28 @@ here with its version, license and reason (agents.md sections 2 and 7).
   Measured completeness is 9.2 mm at Draft and 6.7 mm at Normal.
 - **Consequence:** the number is honest for a turntable capture and says nothing about surfaces the
   scan missed entirely; a coverage claim needs the area actually captured, not this metric.
+
+### D049 - The app gets its dense cloud from one dense session fed by the sparse stage
+- **Decision:** the bridge gains a dense session (`denseCreate`, `denseDestroy`, `denseAddView`,
+  `denseSetHints`, `denseRun`, `densePointCount`, `denseCopyPoints`, `denseProgress`,
+  `denseCancel`). It stores posed gray views plus the sparse points as depth hints, runs
+  `mvs::reconstructDense` under its own mutex, and answers progress and cancel without that mutex so
+  a blocking run can still be stopped. `ReconstructionRunner` decodes each keyframe once, runs the
+  sparse stage, copies every placed view's pose into the dense session, and returns the fused cloud
+  next to the sparse one. The capture screen has a "3D" toggle and a Draft/Normal/High preset; when
+  a capture stops the pass runs on 24 evenly spaced keyframes and its cloud replaces the overlay.
+- **Reason:** the dense stage needs two things the app does not have on its own - camera poses and a
+  sense of scale. The sparse stage produces both in one free-scale frame (D028), so the dense views
+  and the hints come out of the same run instead of a second reconstruction that could disagree with
+  the first. A separate dense handle keeps a run that takes minutes off the reconstruction lock, and
+  the overlay then shows a dense cloud in exactly the frame the sparse map already occupies.
+- **Verified:** `BridgeApi.DenseRunFusesPosedViews` fuses the synthetic box through the C API the app
+  uses (8 posed views at 120 px, more than 100 points, progress reaching 1.0); the unknown-handle
+  case is rejected. The Kotlin side is covered by `DenseRangeTest` (the fallback depth window from
+  the camera radius) and `MvsQualityTest` (the measured presets), and the app builds and passes its
+  JVM tests. Nothing has been installed on the SM-G930F, so this is a host verification only.
+- **Consequence:** a dense pass requires a sparse map - with no points there is neither a frame nor a
+  hint range, so the pass is skipped and logged rather than guessed. The pass is bounded to 24
+  keyframes and 480 px for now, the streamed `cloud.ply` keeps the sparse map (the Blender add-on
+  reads that file as the live map), and the dense cloud is single-colour until the app-side sampler
+  colours it from a keyframe.

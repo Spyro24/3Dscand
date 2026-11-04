@@ -22,6 +22,9 @@ object CaptureTestBridge {
 
         /** Reconstructs the newest saved session and loads it into the overlay. */
         fun reconstructLatestSession()
+
+        /** Runs the dense stage on the newest saved session (roadmap 6). */
+        fun runDensePass()
     }
 
     @Volatile

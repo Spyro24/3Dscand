@@ -220,9 +220,14 @@ loop runs on a small worker pool sized from `hardware_concurrency` and capped at
 count agents.md lists for MVS (D047). Fusion then runs once over the surviving maps, so a cloud is
 only published when the run was not cancelled.
 
-Nothing in the app calls this yet: the bridge has no dense entry point and the overlay still draws
-the sparse map. The desktop binary `tests/tools/mvs_report.cpp` is what prints the acceptance
-numbers, and it is built only in `nativeTest`.
+The app reaches it through the bridge (`denseCreate`, `denseAddView`, `denseSetHints`, `denseRun`,
+`denseCopyPoints`, with `denseProgress` and `denseCancel` answering from other threads) and through
+`ReconstructionRunner`: the runner decodes each keyframe once, runs the sparse stage, feeds every
+placed view's pose into the dense session, passes the sparse points as depth hints, and hands the
+fused cloud to the overlay instead of the sparse one. The capture screen's "3D" toggle starts that
+pass when a capture stops, with Draft/Normal/High presets. The desktop binary
+`tests/tools/mvs_report.cpp` is what prints the acceptance numbers, and it is built only in
+`nativeTest`.
 
 ## Capture to reconstruction (app wiring)
 
@@ -294,9 +299,10 @@ a saved session through `sfm::Session` and load it into the overlay, but only th
   forward-backward consistency filter, voxel fusion, the Draft/Normal/High working widths and
   cancellation with progress are in place and covered by nine host tests. On the synthetic turntable
   the fused cloud is 4.7 mm from the ground truth at Normal quality and 100 images at Draft take
-  76 s on the host, inside the "few minutes" budget. Not measured on the SM-G930F and not wired into
-  the app: there is no dense entry point in the bridge, so the overlay still shows the sparse map
-  (D045-D048, `docs/benchmarks/phase6-mvs-verification.md`).
+  76 s on the host, inside the "few minutes" budget. The dense stage is wired into the app through
+  the bridge and the capture screen's 3D toggle (D049), but the build has not been installed on the
+  SM-G930F, so nothing about the phone path is measured (D045-D049,
+  `docs/benchmarks/phase6-mvs-verification.md`).
 - Phases 7 and later are unimplemented; `roadmap.md` is the source of truth.
 
 The preview is drawn in whatever orientation the camera's texture transform delivers: on the

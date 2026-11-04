@@ -1,6 +1,7 @@
 package com.scand3d.ui
 
 import com.scand3d.capture.LockedCaptureSettings
+import com.scand3d.reconstruct.MvsQuality
 import com.scand3d.sensors.ImuMode
 import com.scand3d.sensors.MotionWarning
 
@@ -35,4 +36,10 @@ data class CaptureUiState(
     /** Overlay toggle and opacity (roadmap 5.4). */
     val overlayEnabled: Boolean = true,
     val overlayOpacity: Float = 1.0f,
+    /** Dense stage (roadmap 6): whether a finished capture gets a dense pass, at which preset, and
+     * its progress while it runs (null when idle). */
+    val denseEnabled: Boolean = false,
+    val denseQuality: MvsQuality = MvsQuality.Normal,
+    val dense_progress: Float? = null,
+    val dense_points: Int = 0,
 )

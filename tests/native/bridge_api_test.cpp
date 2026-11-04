@@ -3,8 +3,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 #include "bridge/bridge_api.hpp"
+#include "synthetic/sfm_scan.hpp"
+#include "synthetic/synthetic_scene.hpp"
 
 namespace {
 
@@ -82,6 +85,69 @@ TEST(BridgeApi, OverlayRejectsUnusablePointsAndUnknownHandles) {
     scand3d::bridge::overlayDestroy(handle);
     EXPECT_FALSE(scand3d::bridge::overlaySetPoints(handle, positions, colours, 1));
     EXPECT_EQ(scand3d::bridge::overlayPointCount(handle), 0);
+}
+
+// The dense stage reaches the app through this C API (roadmap 6): the app feeds the poses the
+// sparse stage found and expects a fused cloud for the overlay. A bridge that fused nothing would
+// leave the preview on the sparse map with no way to tell why.
+TEST(BridgeApi, DenseRunFusesPosedViews) {
+    const int view_count = 8;
+    const auto scene = scand3d::synthetic::makeNoiseTexturedBoxScene(
+        view_count, 1.5, 0.6, 320, 240, 0.75 * 320, 7u);
+    const auto handle = scand3d::bridge::denseCreate();
+    ASSERT_NE(handle, 0u);
+
+    std::vector<double> hints;
+    for (const auto& vertex : scene.mesh.vertices) {
+        hints.push_back(vertex.position_m[0]);
+        hints.push_back(vertex.position_m[1]);
+        hints.push_back(vertex.position_m[2]);
+    }
+    scand3d::bridge::denseSetHints(handle, hints.data(), static_cast<int>(hints.size() / 3));
+
+    for (int index = 0; index < view_count; ++index) {
+        const auto image = scand3d::synthetic::render(scene, index);
+        const auto& camera = scene.cameras[static_cast<std::size_t>(index)];
+        const auto pose = scand3d::synthetic::poseOf(camera);
+        const int added = scand3d::bridge::denseAddView(
+            handle, image.pixels.data(), image.width_px, image.height_px, camera.focal_px,
+            camera.cx_px, camera.cy_px, pose.rotation.data(), pose.camera_centre_m.data());
+        EXPECT_EQ(added, index);
+    }
+
+    const int points = scand3d::bridge::denseRun(handle, 120, 0.05, 20.0);
+    ASSERT_GT(points, 100);
+    EXPECT_DOUBLE_EQ(scand3d::bridge::denseProgress(handle), 1.0);
+    EXPECT_EQ(scand3d::bridge::densePointCount(handle), points);
+
+    std::vector<double> positions(static_cast<std::size_t>(points) * 3);
+    EXPECT_EQ(scand3d::bridge::denseCopyPoints(handle, positions.data(), points), points);
+    // The cloud has to sit where the box is, not at the origin of an empty result.
+    bool any_offset = false;
+    for (int index = 0; index < points; ++index) {
+        const double* point = positions.data() + index * 3;
+        if (std::isfinite(point[0]) && std::isfinite(point[1]) && std::isfinite(point[2]) &&
+            (std::abs(point[0]) > 0.05 || std::abs(point[1]) > 0.05)) {
+            any_offset = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(any_offset);
+
+    scand3d::bridge::denseDestroy(handle);
+    EXPECT_EQ(scand3d::bridge::densePointCount(handle), 0);
+}
+
+TEST(BridgeApi, DenseRejectsUnknownHandlesAndEmptyViews) {
+    constexpr scand3d::bridge::DenseHandle unknown = 999999u;
+    EXPECT_EQ(scand3d::bridge::denseRun(unknown, 160, 0.1, 10.0), -1);
+    EXPECT_EQ(scand3d::bridge::densePointCount(unknown), 0);
+    EXPECT_DOUBLE_EQ(scand3d::bridge::denseProgress(unknown), 0.0);
+    EXPECT_EQ(
+        -1, scand3d::bridge::denseAddView(
+                unknown, nullptr, 0, 0, 0.0, 0.0, 0.0, nullptr, nullptr));
+    scand3d::bridge::denseCancel(unknown);
+    scand3d::bridge::denseDestroy(unknown);
 }
 
 }  // namespace

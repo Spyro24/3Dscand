@@ -26,6 +26,13 @@
     <string name="capture_gallery_description">Newest saved frame</string>
     <string name="capture_flip_label">Flip camera</string>
     <string name="overlay_opacity_label">Overlay opacity</string>
+    <string name="dense_toggle_label">Dense cloud</string>
+    <string name="dense_quality_content_description">Dense quality: %1$s</string>
+    <string name="dense_quality_draft">Draft</string>
+    <string name="dense_quality_normal">Normal</string>
+    <string name="dense_quality_high">High</string>
+    <string name="capture_status_dense_progress">Dense %1$d%%</string>
+    <string name="capture_status_dense_points">%1$d dense points</string>
 
     <string name="permission_denied_title">Camera access denied</string>
     <string name="permission_denied_body">Allow camera access in the system settings to start a scan.</string>

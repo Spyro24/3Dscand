@@ -312,3 +312,121 @@ Java_com_scand3d_core_bridge_NativeCore_nativeOverlaySampleColors(
         static_cast<scand3d::bridge::OverlayHandle>(handle), camera, pixels.data(),
         keyframe_width_px, keyframe_height_px);
 }
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionCopyCamera(
+    JNIEnv* env, jobject /*instance*/, jlong handle, jint index, jdoubleArray out_rotation,
+    jdoubleArray out_centre_m) {
+    if (out_rotation == nullptr || out_centre_m == nullptr ||
+        env->GetArrayLength(out_rotation) < 9 || env->GetArrayLength(out_centre_m) < 3) {
+        return JNI_FALSE;
+    }
+    double rotation[9] = {};
+    double centre[3] = {};
+    if (!scand3d::bridge::reconstructionCopyCamera(
+            static_cast<scand3d::bridge::ReconstructionHandle>(handle), index, rotation, centre)) {
+        return JNI_FALSE;
+    }
+    env->SetDoubleArrayRegion(out_rotation, 0, 9, rotation);
+    env->SetDoubleArrayRegion(out_centre_m, 0, 3, centre);
+    return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeDenseCreate(JNIEnv* /*env*/, jobject /*instance*/) {
+    return static_cast<jlong>(scand3d::bridge::denseCreate());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeDenseDestroy(JNIEnv* /*env*/, jobject /*instance*/,
+                                                           jlong handle) {
+    scand3d::bridge::denseDestroy(static_cast<scand3d::bridge::DenseHandle>(handle));
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeDenseAddView(
+    JNIEnv* env, jobject /*instance*/, jlong handle, jbyteArray gray, jint width_px, jint height_px,
+    jdouble focal_px, jdouble cx_px, jdouble cy_px, jdoubleArray rotation, jdoubleArray centre_m) {
+    if (rotation == nullptr || centre_m == nullptr || env->GetArrayLength(rotation) < 9 ||
+        env->GetArrayLength(centre_m) < 3 || width_px <= 0 || height_px <= 0) {
+        return -1;
+    }
+    const std::vector<unsigned char> pixels = readGray(env, gray);
+    if (pixels.empty() ||
+        pixels.size() != static_cast<std::size_t>(width_px) * static_cast<std::size_t>(height_px)) {
+        return -1;
+    }
+    double rotation_values[9] = {};
+    double centre_values[3] = {};
+    env->GetDoubleArrayRegion(rotation, 0, 9, rotation_values);
+    env->GetDoubleArrayRegion(centre_m, 0, 3, centre_values);
+    return scand3d::bridge::denseAddView(
+        static_cast<scand3d::bridge::DenseHandle>(handle), pixels.data(), width_px, height_px,
+        focal_px, cx_px, cy_px, rotation_values, centre_values);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeDenseSetHints(JNIEnv* env, jobject /*instance*/,
+                                                             jlong handle,
+                                                             jdoubleArray positions_m) {
+    if (positions_m == nullptr) {
+        return;
+    }
+    const jsize length = env->GetArrayLength(positions_m);
+    if (length % 3 != 0) {
+        return;
+    }
+    std::vector<double> positions(static_cast<std::size_t>(length));
+    env->GetDoubleArrayRegion(positions_m, 0, length, positions.data());
+    scand3d::bridge::denseSetHints(
+        static_cast<scand3d::bridge::DenseHandle>(handle), positions.data(),
+        static_cast<int>(length / 3));
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeDenseRun(JNIEnv* /*env*/, jobject /*instance*/,
+                                                       jlong handle, jint working_width_px,
+                                                       jdouble min_depth_m, jdouble max_depth_m) {
+    return scand3d::bridge::denseRun(
+        static_cast<scand3d::bridge::DenseHandle>(handle), working_width_px, min_depth_m,
+        max_depth_m);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeDensePointCount(JNIEnv* /*env*/, jobject /*instance*/,
+                                                              jlong handle) {
+    return scand3d::bridge::densePointCount(static_cast<scand3d::bridge::DenseHandle>(handle));
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeDenseCopyPoints(
+    JNIEnv* env, jobject /*instance*/, jlong handle, jdoubleArray out_positions) {
+    if (out_positions == nullptr) {
+        return 0;
+    }
+    const jsize length = env->GetArrayLength(out_positions);
+    const int max_points = length / 3;
+    if (max_points <= 0) {
+        return 0;
+    }
+    std::vector<double> positions(static_cast<std::size_t>(max_points) * 3);
+    const int written = scand3d::bridge::denseCopyPoints(
+        static_cast<scand3d::bridge::DenseHandle>(handle), positions.data(), max_points);
+    if (written <= 0) {
+        return 0;
+    }
+    env->SetDoubleArrayRegion(out_positions, 0, written * 3, positions.data());
+    return written;
+}
+
+extern "C" JNIEXPORT jdouble JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeDenseProgress(JNIEnv* /*env*/, jobject /*instance*/,
+                                                            jlong handle) {
+    return scand3d::bridge::denseProgress(static_cast<scand3d::bridge::DenseHandle>(handle));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeDenseCancel(JNIEnv* /*env*/, jobject /*instance*/,
+                                                          jlong handle) {
+    scand3d::bridge::denseCancel(static_cast<scand3d::bridge::DenseHandle>(handle));
+}
