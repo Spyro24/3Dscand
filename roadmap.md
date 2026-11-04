@@ -127,10 +127,10 @@ the same letterboxed rectangle, blending far to near without a depth buffer. Hos
 projection (centre, axis directions, behind-camera culling, colour, ordering, pose, degenerate
 cameras) and the C API round trip. The app has no reconstruction output yet (D030), so the render
 path is driven by a debug-only canned cloud, requested with `adb shell am broadcast -a
-com.scand3d.debug.CAPTURE --es cmd overlay --es value on`. That on-device check has **not been
-run**: the phone was disconnected when this landed, so the GL point pass is compiled and its
-projection is tested, but nothing has yet shown the points drawing over the preview. `[~]` means
-exactly that, plus real points are not fed in until the Phase 4 wiring exists; 5.2-5.5 are open.
+com.scand3d.debug.CAPTURE --es cmd overlay --es value on`. That check ran on the SM-G930F: with the
+1280x720 preview running and exposure locked, all 64 points were projected and the ring drew in
+colour over the monochrome image, correctly placed inside the letterbox. `[~]` stands only because
+real points are not fed in until the Phase 4 app wiring exists (D030); 5.2-5.5 are open.
 
 ---
 
