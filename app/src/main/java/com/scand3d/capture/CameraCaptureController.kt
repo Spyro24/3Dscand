@@ -65,7 +65,15 @@ class CameraCaptureController(
     val cameraClockSource: String
 
     private val cameraId: String?
-    private val sensorOrientationDeg: Int
+
+    /** Sensor image rotation for this camera; the overlay extrinsic needs it (roadmap 5.2). */
+    val sensorOrientationDeg: Int
+
+    /** Camera focal length in millimeters, 0 when the device did not report one. */
+    val focalLengthMm: Float
+
+    /** Long edge of the sensor in millimeters, 0 when the device did not report one. */
+    val sensorLongEdgeMm: Double
     private val fpsRange: Range<Int>?
     private var cameraThread: HandlerThread? = null
     private var handler: Handler? = null
@@ -99,6 +107,8 @@ class CameraCaptureController(
         var fps: Range<Int>? = null
         var clockSource = "unknown"
         var error: String? = null
+        var focal_mm = 0f
+        var sensor_long_mm = 0.0
 
         try {
             resolvedId = findBackCameraId()
@@ -112,6 +122,12 @@ class CameraCaptureController(
                 fps = chooseFpsRange(characteristics)
             }
             orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+            focal_mm = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                ?.firstOrNull() ?: 0f
+            val physical = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+            if (physical != null) {
+                sensor_long_mm = maxOf(physical.width, physical.height).toDouble()
+            }
             clockSource = if (
                 characteristics.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) ==
                 CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
@@ -131,6 +147,21 @@ class CameraCaptureController(
         sensorOrientationDeg = orientation
         fpsRange = fps
         cameraClockSource = clockSource
+        focalLengthMm = focal_mm
+        sensorLongEdgeMm = sensor_long_mm
+    }
+
+    /**
+     * Focal length in pixels for an image whose long edge is `imageLongEdgePx` (roadmap 5.2).
+     * Square pixels make one focal length serve both axes, so the long edge is enough; the
+     * principal point is taken as the image centre. Returns 0 when the camera did not report the
+     * physical numbers, which tells the overlay to stay off rather than guess.
+     */
+    fun focalPxFor(imageLongEdgePx: Int): Double {
+        if (focalLengthMm <= 0f || sensorLongEdgeMm <= 0.0 || imageLongEdgePx <= 0) {
+            return 0.0
+        }
+        return focalLengthMm.toDouble() * imageLongEdgePx / sensorLongEdgeMm
     }
 
     /** Loads total numbers of preview frames buffered; used by later phases and diagnostics. */

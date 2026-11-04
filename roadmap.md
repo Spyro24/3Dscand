@@ -113,9 +113,9 @@ sweeps, and the limits of that evidence are in `docs/benchmarks/phase4-sfm-verif
 Goal: the reconstruction appears in color over the monochrome preview, aligned to the live view.
 
 - [~] 5.1 Render sparse points over the grayscale camera background
-- [ ] 5.2 Use live IMU and tracking pose for the overlay camera
-- [ ] 5.3 Per-point color sampled from keyframes
-- [ ] 5.4 Overlay opacity slider and on/off toggle
+- [~] 5.2 Use live IMU and tracking pose for the overlay camera
+- [~] 5.3 Per-point color sampled from keyframes
+- [~] 5.4 Overlay opacity slider and on/off toggle
 - [ ] 5.5 Drift check: overlay stays aligned after motion
 
 **Acceptance:** overlay stays within about 10 px of the real object after 10 seconds of handheld motion; overlay toggle is instant (under 100 ms).
@@ -130,7 +130,29 @@ path is driven by a debug-only canned cloud, requested with `adb shell am broadc
 com.scand3d.debug.CAPTURE --es cmd overlay --es value on`. That check ran on the SM-G930F: with the
 1280x720 preview running and exposure locked, all 64 points were projected and the ring drew in
 colour over the monochrome image, correctly placed inside the letterbox. `[~]` stands only because
-real points are not fed in until the Phase 4 app wiring exists (D030); 5.2-5.5 are open.
+real points are not fed in until the Phase 4 app wiring exists (D030).
+
+5.2 is implemented as far as the available pose goes: the overlay camera takes the camera's own
+focal length (`LENS_INFO_AVAILABLE_FOCAL_LENGTHS` scaled by `SENSOR_INFO_PHYSICAL_SIZE`, principal
+point at the image centre), the display orientation as the body-to-camera extrinsic, and the live
+fused quaternion relative to the pose the overlay was anchored at, re-projected at 33 ms intervals
+and covered by nine JUnit cases (`OverlayGeometryTest`). Tracking pose does not exist yet, so the
+camera is rotation-only: translation is not compensated (D032).
+
+5.3 is implemented natively: `overlay::samplePointColors` takes the per-channel median of a 3x3
+keyframe patch around each point's projection, and `KeyframeColorSampler` decodes the newest saved
+JPEG, packs it to RGB and calls it through the bridge (D033). Six gtest cases cover it. With no
+reconstruction the sampling runs on points whose geometry is still the debug cloud.
+
+5.4 is implemented end to end: a switch and an opacity slider in the capture overlay drive
+`OverlayFeed.setStyle`, which reaches the renderer's blend uniform without re-projecting, so the
+toggle costs one frame.
+
+5.5 stays `[ ]`: the acceptance line is alignment to the real object within about 10 px after 10
+seconds of handheld motion, and that needs a real cloud plus a tracked pose. What exists is the
+instrumentation: while the overlay is on, the view model logs once a second the angle between the
+anchored pose and the live one and the projected centre of the cloud, in NDC (D032).
+
 
 ---
 

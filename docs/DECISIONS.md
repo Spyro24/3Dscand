@@ -373,3 +373,43 @@ here with its version, license and reason (agents.md sections 2 and 7).
 - **Consequence:** the app has no reconstruction output yet (D030), so roadmap 5.1 is verified with
   a debug-only canned cloud behind the debug receiver, marked `// STUB` in the code and in
   `roadmap.md`. It stays `[~]` until it draws real points.
+
+### D032 - The overlay camera is rotation-only until tracking exists
+- **Decision:** the overlay camera takes its intrinsics from the camera itself (focal length from
+  `LENS_INFO_AVAILABLE_FOCAL_LENGTHS` scaled by `SENSOR_INFO_PHYSICAL_SIZE`, principal point at
+  the image centre) and its orientation from the fused IMU quaternion relative to the pose the
+  overlay was anchored at, composed with a body-to-camera extrinsic that follows the display
+  rotation (`OverlayGeometry`). Its centre is the origin: translation is not estimated.
+- **Reason:** there is no tracking pose in the app yet (D030), and inventing one would put a
+  plausible-looking overlay on screen that is wrong in a way nobody can measure. A rotation-only
+  overlay is honest about what the sensors know: rotating the phone moves the cloud as if it were
+  fixed in the room, moving the phone does not.
+- **Consequence:** roadmap 5.2 is done for the IMU half and open for the tracking half, and 5.5
+  (alignment within 10 px after 10 s of handheld motion) cannot be measured, because handheld
+  motion includes translation. The instrument that will measure it is in place: the view model
+  logs, once a second, the anchored-to-live pose angle and the projected cloud centre in NDC.
+- **Not verified on device:** the sign of the display-rotation step is asserted as
+  `ROTATION_90`-one-quarter-turn in `OverlayGeometryTest`; whether that rolls the cloud the same
+  way the preview is rolled has to be checked by rotating the phone while the overlay is on.
+
+### D033 - Keyframe colours are sampled through the app, not in the core
+- **Decision:** the reconstruction core stays gray (D022), so overlay colours come from the app:
+  `KeyframeColorSampler` decodes the newest saved keyframe JPEG, packs it to 3-byte RGB, and hands
+  it to `overlay::samplePointColors`, which takes the per-channel median of a 3x3 patch around each
+  point's projection. The median keeps one specular or anti-aliased pixel from tinting a point.
+- **Reason:** decoding JPEG is an Android codec job and the core is forbidden a decoder anyway
+  (agents.md section 2 allows libjpeg, but the feature pipeline is defined on gray images).
+  Keeping sampling in `core/overlay` means it is unit-testable without Android.
+- **Consequence:** one keyframe and one camera are sampled per call; a point seen by several
+  keyframes takes the colour of the keyframe it was sampled from, not a cross-view average. That is
+  enough for a sparse overlay and is recorded here rather than hidden.
+
+### D034 - Phase 5 status: 5.1-5.4 implemented, 5.5 open
+- **Decision:** 5.1 to 5.4 are marked `[~]` and 5.5 stays `[ ]`. `[~]` means the code, the host
+  tests and the wiring are in place, and what is missing is real reconstruction input, not more
+  work on the task itself.
+- **Reason:** the same convention as Phases 2, 3 and 4, and the same cause: D030 left the app
+  without a capture-to-reconstruction path, so nothing in Phase 5 can be measured against a real
+  object.
+- **Consequence:** Phase 5 cannot be called accepted until a real cloud exists and 5.5 has a
+  number. The next useful piece of work is that wiring, not more overlay code.

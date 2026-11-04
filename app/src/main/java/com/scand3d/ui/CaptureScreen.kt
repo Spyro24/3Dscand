@@ -13,12 +13,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -31,6 +34,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -107,7 +112,12 @@ fun CaptureRoute(viewModel: CaptureViewModel = viewModel()) {
                         onTextureReady = viewModel::onPreviewTextureReady,
                     )
                 }
-                CaptureOverlay(state = state, onToggleCapture = viewModel::toggleCapture)
+                CaptureOverlay(
+                    state = state,
+                    onToggleCapture = viewModel::toggleCapture,
+                    onOverlayEnabledChange = viewModel::setOverlayEnabled,
+                    onOverlayOpacityChange = viewModel::setOverlayOpacity,
+                )
             }
         }
     }
@@ -134,12 +144,17 @@ private fun CameraPreview(
             }
         },
         // The renderer is rebuilt with the view; stop feeding the old one.
-        onRelease = { OverlayFeed.bind(null) },
+        onRelease = { OverlayFeed.bind(null, null) },
     )
 }
 
 @Composable
-private fun CaptureOverlay(state: CaptureUiState, onToggleCapture: () -> Unit) {
+private fun CaptureOverlay(
+    state: CaptureUiState,
+    onToggleCapture: () -> Unit,
+    onOverlayEnabledChange: (Boolean) -> Unit,
+    onOverlayOpacityChange: (Float) -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -149,7 +164,51 @@ private fun CaptureOverlay(state: CaptureUiState, onToggleCapture: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         StatusPanel(state)
+        OverlayControls(
+            state = state,
+            onEnabledChange = onOverlayEnabledChange,
+            onOpacityChange = onOverlayOpacityChange,
+        )
         PrimaryCaptureButton(state = state, onToggleCapture = onToggleCapture)
+    }
+}
+
+/** Overlay toggle and opacity (roadmap 5.4); both act on the renderer, not on capture. */
+@Composable
+private fun OverlayControls(
+    state: CaptureUiState,
+    onEnabledChange: (Boolean) -> Unit,
+    onOpacityChange: (Float) -> Unit,
+) {
+    val opacityLabel = stringResource(R.string.overlay_opacity_label)
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                text = stringResource(R.string.overlay_toggle_label),
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Switch(
+                checked = state.overlayEnabled,
+                onCheckedChange = onEnabledChange,
+                modifier = Modifier.padding(start = 12.dp),
+            )
+        }
+        Slider(
+            value = state.overlayOpacity,
+            onValueChange = onOpacityChange,
+            valueRange = 0f..1f,
+            enabled = state.overlayEnabled,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp)
+                .semantics { contentDescription = opacityLabel },
+        )
     }
 }
 

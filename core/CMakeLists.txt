@@ -22,6 +22,7 @@ add_library(scand3d_core SHARED
     geometry/linalg.cpp
     geometry/two_view.cpp
     overlay/overlay_scene.cpp
+    overlay/point_color.cpp
     sensors/keyframe_prior.cpp
     sensors/mahony_filter.cpp
     sensors/tilt_orientation.cpp

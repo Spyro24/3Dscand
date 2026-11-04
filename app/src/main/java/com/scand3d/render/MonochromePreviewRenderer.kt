@@ -46,6 +46,8 @@ class MonochromePreviewRenderer(
     private var overlayBuffer: FloatBuffer? = null
     private var overlayVertexCount = 0
     private var pendingOverlay: FloatArray? = null
+    private var overlayEnabled = true
+    private var overlayOpacity = 1.0f
 
     /** The GLSurfaceView installs its redraw request here so frames are drawn when they arrive. */
     fun bindRequestRender(block: () -> Unit) {
@@ -82,8 +84,8 @@ class MonochromePreviewRenderer(
         pointColorHandle = GLES20.glGetAttribLocation(pointsProgram, "aColor")
         pointOpacityHandle = GLES20.glGetUniformLocation(pointsProgram, "uOpacity")
         pointSizeHandle = GLES20.glGetUniformLocation(pointsProgram, "uPointSize")
-        // Replays the last published scene into a renderer that was just rebuilt.
-        OverlayFeed.bind(::submitOverlay)
+        // Replays the last published scene and style into a renderer that was just rebuilt.
+        OverlayFeed.bind(::submitOverlay, ::applyOverlayStyle)
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -145,6 +147,15 @@ class MonochromePreviewRenderer(
         requestRender?.invoke()
     }
 
+    /** Visibility and opacity reach the GL thread separately, so toggling never re-projects. */
+    private fun applyOverlayStyle(enabled: Boolean, opacity: Float) {
+        synchronized(this) {
+            overlayEnabled = enabled
+            overlayOpacity = opacity
+        }
+        requestRender?.invoke()
+    }
+
     private fun drawOverlay() {
         val incoming = synchronized(this) {
             val pending = pendingOverlay
@@ -160,14 +171,16 @@ class MonochromePreviewRenderer(
             overlayVertexCount = incoming.size / OVERLAY_VERTEX_FLOATS
         }
         val buffer = overlayBuffer
-        if (overlayVertexCount == 0 || pointsProgram == 0 || buffer == null) {
+        if (!overlayEnabled || overlayOpacity <= 0.0f || overlayVertexCount == 0 ||
+            pointsProgram == 0 || buffer == null
+        ) {
             return
         }
 
         GLES20.glUseProgram(pointsProgram)
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-        GLES20.glUniform1f(pointOpacityHandle, OVERLAY_OPACITY)
+        GLES20.glUniform1f(pointOpacityHandle, overlayOpacity)
         GLES20.glUniform1f(pointSizeHandle, OVERLAY_POINT_SIZE_PX)
 
         GLES20.glEnableVertexAttribArray(pointPositionHandle)
@@ -205,7 +218,6 @@ class MonochromePreviewRenderer(
         const val LOG_TAG = "MonochromePreview"
         const val OVERLAY_VERTEX_FLOATS = 5
         const val OVERLAY_STRIDE_BYTES = OVERLAY_VERTEX_FLOATS * 4
-        const val OVERLAY_OPACITY = 1.0f
         const val OVERLAY_POINT_SIZE_PX = 6.0f
 
         // Luminance from the sensor's RGB, then a single grey channel: no colour reaches the screen.

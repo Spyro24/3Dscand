@@ -35,6 +35,7 @@ add_library(scand3d_test_util STATIC
     "${SCAND3D_CORE_DIR}/geometry/linalg.cpp"
     "${SCAND3D_CORE_DIR}/geometry/two_view.cpp"
     "${SCAND3D_CORE_DIR}/overlay/overlay_scene.cpp"
+    "${SCAND3D_CORE_DIR}/overlay/point_color.cpp"
     "${SCAND3D_CORE_DIR}/sensors/keyframe_prior.cpp"
     "${SCAND3D_CORE_DIR}/sensors/mahony_filter.cpp"
     "${SCAND3D_CORE_DIR}/sensors/tilt_orientation.cpp"
@@ -111,6 +112,12 @@ add_executable(overlay_test
 )
 target_link_libraries(overlay_test PRIVATE scand3d_test_util GTest::gtest_main)
 gtest_discover_tests(overlay_test)
+
+add_executable(point_color_test
+    native/point_color_test.cpp
+)
+target_link_libraries(point_color_test PRIVATE scand3d_test_util GTest::gtest_main)
+gtest_discover_tests(point_color_test)
 
 add_executable(synthetic_scene_test
     native/synthetic_scene_test.cpp

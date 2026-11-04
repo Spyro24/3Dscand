@@ -117,6 +117,41 @@ object NativeCore {
             0
         }
 
+    /**
+     * Re-samples every point's colour from a keyframe (roadmap 5.3). `rgb` is packed 3 bytes per
+     * pixel at `keyframe_width_px` x `keyframe_height_px`, in the camera's pixel space.
+     */
+    fun overlaySampleColors(
+        handle: Long,
+        rotation: DoubleArray,
+        centre_m: DoubleArray,
+        focal_px: Double,
+        cx_px: Double,
+        cy_px: Double,
+        image_width_px: Int,
+        image_height_px: Int,
+        rgb: ByteArray,
+        keyframe_width_px: Int,
+        keyframe_height_px: Int,
+    ): Int =
+        if (isLoaded && handle != 0L && rotation.size == 9 && centre_m.size == 3) {
+            nativeOverlaySampleColors(
+                handle,
+                rotation,
+                centre_m,
+                focal_px,
+                cx_px,
+                cy_px,
+                image_width_px,
+                image_height_px,
+                rgb,
+                keyframe_width_px,
+                keyframe_height_px,
+            )
+        } else {
+            0
+        }
+
     private external fun nativeCoreVersion(): String
 
     private external fun nativeImuCreate(sample_rate_hz: Double): Long
@@ -147,6 +182,20 @@ object NativeCore {
         positions_m: DoubleArray,
         rgb: FloatArray,
     ): Boolean
+
+    private external fun nativeOverlaySampleColors(
+        handle: Long,
+        rotation: DoubleArray,
+        centre_m: DoubleArray,
+        focal_px: Double,
+        cx_px: Double,
+        cy_px: Double,
+        image_width_px: Int,
+        image_height_px: Int,
+        rgb: ByteArray,
+        keyframe_width_px: Int,
+        keyframe_height_px: Int,
+    ): Int
 
     private external fun nativeOverlayProject(
         handle: Long,

@@ -18,6 +18,8 @@
     <string name="capture_imu_unavailable">No usable motion sensors: orientation is missing</string>
     <string name="capture_imu_reduced_accuracy">Reduced orientation accuracy (no gyroscope)</string>
     <string name="capture_motion_blur">Moving too fast — hold still</string>
+    <string name="overlay_toggle_label">Color overlay</string>
+    <string name="overlay_opacity_label">Overlay opacity</string>
 
     <string name="permission_denied_title">Camera access denied</string>
     <string name="permission_denied_body">Allow camera access in the system settings to start a scan.</string>

@@ -42,6 +42,15 @@ struct OverlayCamera {
     int image_height_px = 0;
 };
 
+/// Projects one world point into displayed-image pixels. False when it is behind the camera or
+/// the camera cannot project; `depth_m` is the distance along the optical axis.
+bool projectToPixel(
+    const OverlayCamera& camera,
+    const Vec3& point_world_m,
+    double& pixel_x,
+    double& pixel_y,
+    double& depth_m);
+
 class OverlayScene {
 public:
     /// Replaces every point. Anything the previous scene held is gone.

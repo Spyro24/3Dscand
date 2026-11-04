@@ -30,4 +30,7 @@ data class CaptureUiState(
     val imu_reduced_accuracy: Boolean = false,
     val motion: MotionWarning = MotionWarning.Steady,
     val keyframe_candidates: Int = 0,
+    /** Overlay toggle and opacity (roadmap 5.4). */
+    val overlayEnabled: Boolean = true,
+    val overlayOpacity: Float = 1.0f,
 )

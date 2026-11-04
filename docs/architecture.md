@@ -175,9 +175,23 @@ overlay cannot change how the monochrome preview looks. Vertices are handed over
 `OverlayFeed`, which keeps the last frame and replays it into a renderer that was rebuilt with the
 view.
 
-Roadmap 5.1 is in place; 5.2 (live pose), 5.3 (colour sampling), 5.4 (opacity and toggle) and 5.5
-(drift check) are open. Because the app has no capture-to-reconstruction path yet (D030), the
-scene is filled from a debug-only canned cloud, marked `// STUB`.
+The overlay camera (5.2) is built from what the device can actually report: focal length from
+`LENS_INFO_AVAILABLE_FOCAL_LENGTHS` scaled by `SENSOR_INFO_PHYSICAL_SIZE`, the principal point at
+the image centre, and the orientation from the fused quaternion relative to the pose the overlay
+was anchored at, composed with a display-rotation extrinsic in `OverlayGeometry`. Projection runs
+every 33 ms on the sensor thread and is published through `OverlayFeed`. There is no tracking pose
+yet, so the camera is rotation-only and its centre is the origin (D032).
+
+Colours (5.3) come from the app, because the core only ever sees gray images: `KeyframeColorSampler`
+decodes the newest saved keyframe, and `overlay::samplePointColors` takes the per-channel median of
+a 3x3 patch around each point's projection (D033). The opacity slider and on/off switch (5.4) go
+through `OverlayFeed.setStyle` straight to the renderer's blend uniform, so toggling never
+re-projects.
+
+The drift check (5.5) is instrumented but not measured: while the overlay is on, the view model
+logs once a second the anchored-to-live pose angle and the cloud's projected centre. Because the
+app has no capture-to-reconstruction path yet (D030), the scene is still a debug-only canned cloud,
+marked `// STUB`, so no frame of reference exists to compare against a real object.
 
 ## Current phase status
 
@@ -207,7 +221,8 @@ scene is filled from a debug-only canned cloud, marked `// STUB`.
   reprojection, 0.261 degree worst pose error); the real-object requirement of 90 percent
   registered keyframes has not been run, and the app-side path from captured frames to matches is
   still missing (D030, `docs/benchmarks/phase4-sfm-verification.md`).
-- Phase 5 in progress: the sparse overlay projection and its GL pass are implemented and covered
-  by host tests, driven for now by a debug-only canned cloud because the app still has no
-  reconstruction output. 5.2-5.5 are open (D031).
+- Phase 5 in progress: the overlay renders, follows the fused IMU pose with real camera
+  intrinsics, samples point colours from keyframes and has its toggle and opacity control, all
+  covered by host tests and (for 5.1) confirmed drawing on the SM-G930F. 5.5 is open and the whole
+  phase stays unaccepted because the app still has no reconstruction to draw (D031-D034).
 - Phases 6 and later are unimplemented; `roadmap.md` is the source of truth.

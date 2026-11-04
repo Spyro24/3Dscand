@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "overlay/overlay_scene.hpp"
+#include "overlay/point_color.hpp"
 #include "sensors/keyframe_prior.hpp"
 #include "sensors/mahony_filter.hpp"
 #include "sensors/tilt_orientation.hpp"
@@ -298,6 +299,49 @@ int overlayProject(
         out[4] = vertex.rgb[2];
     }
     return written;
+}
+
+int overlaySampleColors(
+    OverlayHandle handle,
+    const OverlayCamera& camera,
+    const unsigned char* rgb,
+    int image_width_px,
+    int image_height_px) {
+    if (rgb == nullptr || image_width_px <= 0 || image_height_px <= 0) {
+        return 0;
+    }
+
+    overlay::RgbImage keyframe;
+    keyframe.width_px = image_width_px;
+    keyframe.height_px = image_height_px;
+    const std::size_t pixel_count =
+        static_cast<std::size_t>(image_width_px) * static_cast<std::size_t>(image_height_px);
+    keyframe.rgb.assign(rgb, rgb + pixel_count * 3u);
+
+    overlay::OverlayCamera input;
+    for (int i = 0; i < 9; ++i) {
+        input.rotation[static_cast<std::size_t>(i)] = camera.rotation[i];
+    }
+    for (int i = 0; i < 3; ++i) {
+        input.centre_m[static_cast<std::size_t>(i)] = camera.centre_m[i];
+    }
+    input.focal_px = camera.focal_px;
+    input.cx_px = camera.cx_px;
+    input.cy_px = camera.cy_px;
+    input.image_width_px = camera.image_width_px;
+    input.image_height_px = camera.image_height_px;
+
+    std::lock_guard<std::mutex> lock(g_overlay_mutex);
+    const auto it = g_overlay_scenes.find(handle);
+    if (it == g_overlay_scenes.end()) {
+        return 0;
+    }
+    std::vector<overlay::OverlayPoint> points = it->second.points();
+    const int sampled = overlay::samplePointColors(keyframe, input, points);
+    if (sampled > 0) {
+        it->second.setPoints(std::move(points));
+    }
+    return sampled;
 }
 
 }  // namespace scand3d::bridge

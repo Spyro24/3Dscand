@@ -3,18 +3,23 @@ package com.scand3d.ui
 import android.app.Application
 import android.graphics.SurfaceTexture
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
+import android.view.WindowManager
 import androidx.lifecycle.AndroidViewModel
 import com.scand3d.benchmark.BenchmarkRecorder
 import com.scand3d.capture.CameraCaptureController
 import com.scand3d.capture.FrameRecord
+import com.scand3d.capture.KeyframeColorSampler
 import com.scand3d.capture.LockedCaptureSettings
 import com.scand3d.capture.SessionStore
 import com.scand3d.core.bridge.NativeCore
 import com.scand3d.core.bridge.NativeOrientationMath
 import com.scand3d.debug.CaptureTestBridge
+import com.scand3d.render.OverlayCameraParams
 import com.scand3d.render.OverlayFeed
+import com.scand3d.render.OverlayGeometry
 import com.scand3d.sensors.AndroidImuSource
 import com.scand3d.sensors.AngularRateMonitor
 import com.scand3d.sensors.DeviceClockProfile
@@ -63,6 +68,9 @@ class CaptureViewModel(application: Application) :
     private var overlayHandle = 0L
     private var overlayPointCount = 0
     private var overlayDemo = false
+    private var overlayReference: DoubleArray? = null
+    private var lastOverlayPublishMs = 0L
+    private var lastDriftLogMs = 0L
 
     init {
         CaptureTestBridge.actions = this
@@ -201,33 +209,43 @@ class CaptureViewModel(application: Application) :
             overlayPointCount = positions.size / 3
             Log.i(LOG_TAG, "overlay demo scene: $overlayPointCount points")
         }
+        // Anchor the overlay frame where the phone is when the overlay comes on.
+        overlayReference = fusedImu.latest()?.quaternion_wxyz?.toDoubleArray()
         publishOverlay()
+        sampleKeyframeColors()
     }
 
-    /** Projects the current scene and hands the vertices to the GL renderer (roadmap 5.1). */
+    /** UI: overlay visibility (roadmap 5.4); the renderer applies it without re-projecting. */
+    fun setOverlayEnabled(enabled: Boolean) {
+        _state.value = _state.value.copy(overlayEnabled = enabled)
+        OverlayFeed.setStyle(enabled, _state.value.overlayOpacity)
+    }
+
+    /** UI: overlay opacity from 0 to 1 (roadmap 5.4). */
+    fun setOverlayOpacity(opacity: Float) {
+        val clamped = opacity.coerceIn(0f, 1f)
+        _state.value = _state.value.copy(overlayOpacity = clamped)
+        OverlayFeed.setStyle(_state.value.overlayEnabled, clamped)
+    }
+
+    /** Projects the scene on the live pose and hands the vertices to the renderer (5.1, 5.2). */
     private fun publishOverlay() {
         val handle = overlayHandle
         if (handle == 0L) {
             return
         }
-        val width = _state.value.previewWidthPx
-        val height = _state.value.previewHeightPx
-        if (width <= 0 || height <= 0) {
-            return
-        }
+        val camera = overlayCameraParams() ?: return
 
-        // STUB: placeholder intrinsics and an identity pose. Roadmap 5.2 replaces both with the
-        // camera model and the tracked pose; until then this only proves the render path.
         val out = FloatArray(MAX_OVERLAY_VERTICES * NativeCore.OVERLAY_VERTEX_VALUE_COUNT)
         val count = NativeCore.overlayProject(
             handle,
-            IDENTITY_ROTATION,
-            ZERO_CENTRE_M,
-            DEMO_FOCAL_FRACTION * width,
-            width / 2.0,
-            height / 2.0,
-            width,
-            height,
+            camera.rotation,
+            camera.centre_m,
+            camera.focal_px,
+            camera.cx_px,
+            camera.cy_px,
+            camera.image_width_px,
+            camera.image_height_px,
             out,
         )
         val vertices = if (count > 0) {
@@ -236,7 +254,125 @@ class CaptureViewModel(application: Application) :
             FloatArray(0)
         }
         OverlayFeed.publish(vertices)
-        Log.i(LOG_TAG, "overlay published $count of $overlayPointCount points")
+        logOverlayDrift(vertices)
+    }
+
+    /**
+     * Roadmap 5.5 asks for a number, not an impression. Once a second, log the angle between the
+     * anchored pose and the live one plus the projected centre of the cloud: with the phone held
+     * still both should stop changing. That is pose drift; alignment to a real object still needs
+     * a real cloud and a tracked pose (D030, D032).
+     */
+    private fun logOverlayDrift(vertices: FloatArray) {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastDriftLogMs < DRIFT_LOG_INTERVAL_MS) {
+            return
+        }
+        lastDriftLogMs = now
+
+        val reference = overlayReference
+        val live = fusedImu.latest()?.quaternion_wxyz
+        val angle_rad = if (reference != null && live != null) {
+            NativeCore.angularDisplacementRad(reference.toList(), live)
+        } else {
+            Double.NaN
+        }
+
+        val stride = NativeCore.OVERLAY_VERTEX_VALUE_COUNT
+        val count = vertices.size / stride
+        var sum_x = 0.0
+        var sum_y = 0.0
+        for (index in 0 until count) {
+            sum_x += vertices[index * stride]
+            sum_y += vertices[index * stride + 1]
+        }
+        val centre_x = if (count > 0) sum_x / count else Double.NaN
+        val centre_y = if (count > 0) sum_y / count else Double.NaN
+        Log.i(
+            LOG_TAG,
+            "overlay drift: pose ${(angle_rad * 180.0 / Math.PI).format(2)} deg, " +
+                "centre (${centre_x.format(4)}, ${centre_y.format(4)})",
+        )
+    }
+
+    private fun Double.format(decimals: Int): String = String.format(java.util.Locale.US, "%.${decimals}f", this)
+
+    /**
+     * Overlay camera for this frame (roadmap 5.2): the camera's own focal length, the display
+     * orientation as the body-to-camera extrinsic, and the live fused orientation relative to the
+     * pose the overlay was anchored at. Null until the camera reported both the preview size and
+     * its physical sensor numbers.
+     */
+    private fun overlayCameraParams(): OverlayCameraParams? {
+        val preview = controller ?: return null
+        val width = _state.value.previewWidthPx
+        val height = _state.value.previewHeightPx
+        if (width <= 0 || height <= 0) {
+            return null
+        }
+        val focal_px = preview.focalPxFor(maxOf(width, height))
+        if (!(focal_px > 0.0)) {
+            return null
+        }
+
+        val extrinsic = OverlayGeometry.bodyFromCamera(
+            frontFacing = false,
+            displayRotationDeg = displayRotationDeg(),
+        )
+        val live = fusedImu.latest()?.quaternion_wxyz?.toDoubleArray()
+        val rotation = when {
+            live == null -> OverlayGeometry.IDENTITY_ROTATION
+            overlayReference == null -> {
+                overlayReference = live
+                OverlayGeometry.overlayRotation(live, live, extrinsic)
+            }
+            else -> OverlayGeometry.overlayRotation(overlayReference!!, live, extrinsic)
+        }
+
+        return OverlayCameraParams(
+            rotation = rotation,
+            centre_m = ZERO_CENTRE_M,
+            focal_px = focal_px,
+            cx_px = width / 2.0,
+            cy_px = height / 2.0,
+            image_width_px = width,
+            image_height_px = height,
+        )
+    }
+
+    /** Colours the scene from the newest saved keyframe (roadmap 5.3). */
+    private fun sampleKeyframeColors() {
+        val handle = overlayHandle
+        val camera = overlayCameraParams()
+        val keyframe = newestKeyframe()
+        if (handle == 0L || camera == null || keyframe == null) {
+            return
+        }
+        if (KeyframeColorSampler.sample(handle, camera, keyframe) > 0) {
+            publishOverlay()
+        }
+    }
+
+    private fun newestKeyframe(): File? {
+        val sessions = File(getApplication<Application>().filesDir, SESSIONS_DIRECTORY)
+        val latest = sessions.listFiles()?.filter { it.isDirectory }?.maxByOrNull { it.name }
+            ?: return null
+        return File(latest, FRAMES_DIRECTORY).listFiles()
+            ?.filter { it.isFile && it.extension == "jpg" }
+            ?.maxByOrNull { it.name }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun displayRotationDeg(): Int {
+        val manager = getApplication<Application>().getSystemService(WindowManager::class.java)
+            ?: return 0
+        val display = manager.defaultDisplay ?: return 0
+        return when (display.rotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
     }
 
     // STUB: Phase 4 output is not wired into the app yet (D030), so the render path is verified
@@ -344,6 +480,16 @@ class CaptureViewModel(application: Application) :
         if (warning != _state.value.motion) {
             _state.value = _state.value.copy(motion = warning)
         }
+
+        // The overlay follows the live pose, refreshed at the preview rate rather than the
+        // 200 Hz sensor rate: re-projecting faster than the screen can show is wasted work.
+        if (overlayDemo) {
+            val now = SystemClock.uptimeMillis()
+            if (now - lastOverlayPublishMs >= OVERLAY_PUBLISH_INTERVAL_MS) {
+                lastOverlayPublishMs = now
+                publishOverlay()
+            }
+        }
     }
 
     /** Stores this device's measured camera/sensor residual for the next session (roadmap 2.3). */
@@ -388,8 +534,9 @@ class CaptureViewModel(application: Application) :
         const val DEMO_POINT_COUNT = 64
         const val DEMO_RING_RADIUS_M = 0.18
         const val DEMO_RING_DISTANCE_M = 1.0
-        const val DEMO_FOCAL_FRACTION = 0.9
-        val IDENTITY_ROTATION = doubleArrayOf(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+        const val OVERLAY_PUBLISH_INTERVAL_MS = 33L
+        const val DRIFT_LOG_INTERVAL_MS = 1000L
+        const val FRAMES_DIRECTORY = "frames"
         val ZERO_CENTRE_M = doubleArrayOf(0.0, 0.0, 0.0)
     }
 }

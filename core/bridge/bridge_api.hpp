@@ -87,4 +87,14 @@ int overlayProject(
     float* out_vertices,
     int max_vertices);
 
+/// Replaces each point's colour with a median sample of the keyframe pixels it projects onto
+/// (roadmap 5.3). `rgb` is packed three bytes per pixel at `image_width_px` x
+/// `image_height_px` in the camera's own pixel space. Returns how many points were sampled.
+int overlaySampleColors(
+    OverlayHandle handle,
+    const OverlayCamera& camera,
+    const unsigned char* rgb,
+    int image_width_px,
+    int image_height_px);
+
 }  // namespace scand3d::bridge

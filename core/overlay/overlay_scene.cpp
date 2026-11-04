@@ -10,6 +10,29 @@ void OverlayScene::setPoints(std::vector<OverlayPoint> points) {
     points_ = std::move(points);
 }
 
+bool projectToPixel(
+    const OverlayCamera& camera,
+    const Vec3& point_world_m,
+    double& pixel_x,
+    double& pixel_y,
+    double& depth_m) {
+    if (camera.image_width_px <= 0 || camera.image_height_px <= 0 || !(camera.focal_px > 0.0)) {
+        return false;
+    }
+    const Mat3 rotation_transpose = geometry::transpose3(camera.rotation);
+    const Vec3 delta{point_world_m[0] - camera.centre_m[0],
+                     point_world_m[1] - camera.centre_m[1],
+                     point_world_m[2] - camera.centre_m[2]};
+    const Vec3 point_camera = geometry::matvec3(rotation_transpose, delta);
+    depth_m = point_camera[2];
+    if (!(depth_m > 1e-9) || !std::isfinite(depth_m)) {
+        return false;
+    }
+    pixel_x = camera.focal_px * point_camera[0] / depth_m + camera.cx_px;
+    pixel_y = camera.focal_px * point_camera[1] / depth_m + camera.cy_px;
+    return std::isfinite(pixel_x) && std::isfinite(pixel_y);
+}
+
 std::vector<ColoredVertex> OverlayScene::project(const OverlayCamera& camera) const {
     std::vector<ColoredVertex> vertices;
     if (points_.empty() || camera.image_width_px <= 0 || camera.image_height_px <= 0 ||
@@ -17,24 +40,12 @@ std::vector<ColoredVertex> OverlayScene::project(const OverlayCamera& camera) co
         return vertices;
     }
 
-    const Mat3 rotation_transpose = geometry::transpose3(camera.rotation);
-    const double half_width = 0.5 * static_cast<double>(camera.image_width_px);
-    const double half_height = 0.5 * static_cast<double>(camera.image_height_px);
-
     vertices.reserve(points_.size());
     for (const OverlayPoint& point : points_) {
-        const Vec3 delta{point.position_m[0] - camera.centre_m[0],
-                         point.position_m[1] - camera.centre_m[1],
-                         point.position_m[2] - camera.centre_m[2]};
-        const Vec3 point_camera = geometry::matvec3(rotation_transpose, delta);
-        const double depth_m = point_camera[2];
-        if (!(depth_m > 1e-9) || !std::isfinite(depth_m)) {
-            continue;
-        }
-
-        const double pixel_x = camera.focal_px * point_camera[0] / depth_m + camera.cx_px;
-        const double pixel_y = camera.focal_px * point_camera[1] / depth_m + camera.cy_px;
-        if (!std::isfinite(pixel_x) || !std::isfinite(pixel_y)) {
+        double pixel_x = 0.0;
+        double pixel_y = 0.0;
+        double depth_m = 0.0;
+        if (!projectToPixel(camera, point.position_m, pixel_x, pixel_y, depth_m)) {
             continue;
         }
 

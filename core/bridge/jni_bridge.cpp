@@ -174,3 +174,34 @@ Java_com_scand3d_core_bridge_NativeCore_nativeOverlayProject(
                              vertices.data());
     return written;
 }
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeOverlaySampleColors(
+    JNIEnv* env, jobject /*instance*/, jlong handle, jdoubleArray rotation, jdoubleArray centre_m,
+    jdouble focal_px, jdouble cx_px, jdouble cy_px, jint image_width_px, jint image_height_px,
+    jbyteArray rgb, jint keyframe_width_px, jint keyframe_height_px) {
+    if (rotation == nullptr || centre_m == nullptr || rgb == nullptr ||
+        env->GetArrayLength(rotation) < 9 || env->GetArrayLength(centre_m) < 3 ||
+        keyframe_width_px <= 0 || keyframe_height_px <= 0) {
+        return 0;
+    }
+    const jsize expected = keyframe_width_px * keyframe_height_px * 3;
+    if (env->GetArrayLength(rgb) != expected) {
+        return 0;
+    }
+
+    scand3d::bridge::OverlayCamera camera{};
+    env->GetDoubleArrayRegion(rotation, 0, 9, camera.rotation);
+    env->GetDoubleArrayRegion(centre_m, 0, 3, camera.centre_m);
+    camera.focal_px = focal_px;
+    camera.cx_px = cx_px;
+    camera.cy_px = cy_px;
+    camera.image_width_px = image_width_px;
+    camera.image_height_px = image_height_px;
+
+    std::vector<unsigned char> pixels(static_cast<std::size_t>(expected));
+    env->GetByteArrayRegion(rgb, 0, expected, reinterpret_cast<jbyte*>(pixels.data()));
+    return scand3d::bridge::overlaySampleColors(
+        static_cast<scand3d::bridge::OverlayHandle>(handle), camera, pixels.data(),
+        keyframe_width_px, keyframe_height_px);
+}
