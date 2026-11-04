@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace scand3d::bridge {
 
@@ -95,6 +96,14 @@ int reconstructionTrackPose(
     double cy_px,
     double out_rotation[9],
     double out_centre_m[3]);
+
+/// Writes the session's map, features included, into `directory` so a later process can
+/// relocalise against a scan it did not build (D058). False when no view is registered or the
+/// directory cannot be written.
+bool reconstructionSaveMap(ReconstructionHandle handle, const std::string& directory);
+
+/// Replaces a session with the map stored in `directory`. False leaves the session untouched.
+bool reconstructionLoadMap(ReconstructionHandle handle, const std::string& directory);
 
 /// Opaque handle to one immutable map snapshot, used to track live frames (D051).
 using TrackerHandle = std::uint64_t;

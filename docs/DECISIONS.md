@@ -877,3 +877,32 @@ Measured on the replayed SM-G930F sessions (`bright480`: 26 frames, 480x360, foc
 - `Session::growthTrace()` records why each candidate view stayed out; `tracking_report` prints it.
 - The dark session still reconstructs nothing (0 of 3 views): 5 frames at 13-21/255 carry too few
   repeatable features, which is the low-light limit of D052, not a registration bug.
+
+## D057 — Track against the nearest few registered views, keeping the best fit
+
+- A live frame used to be matched against exactly one reference view, so it lost its
+  correspondences as soon as the camera panned past that view's part of the map. `SfmOptions::
+  track_reference_limit` (default 3) matches the anchor and its nearest registered neighbours.
+- Pooling their correspondences into one PnP is not monotone: a reference whose points are badly
+  triangulated drags the shared fit down, and 12 map views tracked 5 of 12 live frames with one
+  reference against 3 with three pooled. Each reference therefore gets its own PnP and the
+  best-supported fit wins, which keeps the single-reference result as a floor.
+- A fit with 40 or more inliers stops the search; further references cost a full match.
+- Measured on `bright480` (focal 357 px): 8 map views tracked 4 of 18 live frames with one
+  reference, 6 with two and 7 with three; 12 map views 3, 4 and 4.
+
+## D058 — A scan's map survives the process
+
+- `Session::saveMap` writes `map.bin` plus one `view_<i>.feat` per view; the feature files use the
+  existing versioned `S3DFEAT1` v2 store rather than a second format. `map.bin` holds the magic
+  `S3DMAP01`, a version, each view's intrinsics and pose, and every point with its observations
+  and its validity flag. Storing the flag matters: without it a loaded map reported 47 points
+  where the session reported 16.
+- `Session::loadMap` restores views, features, poses, points and the report, and tracking then
+  behaves exactly as after a run. `reconstructionSaveMap` / `reconstructionLoadMap` expose it
+  through the bridge, and `NativeCore` mirrors them.
+- Proof on the real scan: the 8-view `bright480` map was saved, reloaded in a new process and
+  tracked 7 of 18 live frames, the same seven as the freshly built map.
+- The app still has to save a scan's map when it stops and load one when a new scan starts; that
+  wiring is deliberately not part of this change because the phone path cannot be verified while
+  the device is off USB.

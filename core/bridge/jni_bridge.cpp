@@ -153,6 +153,34 @@ Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionRun(JNIEnv* /*env*/,
         static_cast<scand3d::bridge::ReconstructionHandle>(handle));
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionSaveMap(JNIEnv* env,
+                                                                   jobject /*instance*/,
+                                                                   jlong handle, jstring path) {
+    const char* directory = path != nullptr ? env->GetStringUTFChars(path, nullptr) : nullptr;
+    if (directory == nullptr) {
+        return JNI_FALSE;
+    }
+    const bool saved = scand3d::bridge::reconstructionSaveMap(
+        static_cast<scand3d::bridge::ReconstructionHandle>(handle), directory);
+    env->ReleaseStringUTFChars(path, directory);
+    return saved ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionLoadMap(JNIEnv* env,
+                                                                   jobject /*instance*/,
+                                                                   jlong handle, jstring path) {
+    const char* directory = path != nullptr ? env->GetStringUTFChars(path, nullptr) : nullptr;
+    if (directory == nullptr) {
+        return JNI_FALSE;
+    }
+    const bool loaded = scand3d::bridge::reconstructionLoadMap(
+        static_cast<scand3d::bridge::ReconstructionHandle>(handle), directory);
+    env->ReleaseStringUTFChars(path, directory);
+    return loaded ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_scand3d_core_bridge_NativeCore_nativeReconstructionPointCount(JNIEnv* /*env*/,
                                                                        jobject /*instance*/,

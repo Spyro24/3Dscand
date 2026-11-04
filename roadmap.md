@@ -101,6 +101,7 @@ Goal: camera poses and a sparse point cloud from a capture session.
 - [~] 4.6 Reconstruction report (registered images, points, reprojection error)
 
 - [x] 4.7 Grow every validated pair into points and refit points on all views (D056)
+- [x] 4.8 Track against the nearest registered views and keep the best PnP fit (D057)
 **Acceptance:** synthetic turntable scan reconstructs with mean reprojection error below 1 px and pose error below 1 degree; a real object scan registers at least 90 percent of keyframes.
 
 **Status:** implementation and host tests are complete for all six tasks (9 new gtest cases; 57
@@ -307,6 +308,7 @@ Goal: the app survives real use.
 - [ ] 11.4 Crash log collection (local only)
 - [ ] 11.5 Profiling pass on the hot paths (features, matching, bundle adjustment, MVS)
 
+- [x] 11.1a Map file: store a scan's map and load it back for relocalisation (D058)
 **Acceptance:** 20 consecutive scan-and-reconstruct runs without crash on each test device; resume works after a forced kill.
 
 ---

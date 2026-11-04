@@ -359,6 +359,24 @@ int reconstructionRun(ReconstructionHandle handle) {
     return it->second->run().views_registered;
 }
 
+bool reconstructionSaveMap(ReconstructionHandle handle, const std::string& directory) {
+    std::lock_guard<std::mutex> lock(g_reconstruction_mutex);
+    const auto it = g_reconstructions.find(handle);
+    if (it == g_reconstructions.end() || directory.empty()) {
+        return false;
+    }
+    return it->second->saveMap(directory);
+}
+
+bool reconstructionLoadMap(ReconstructionHandle handle, const std::string& directory) {
+    std::lock_guard<std::mutex> lock(g_reconstruction_mutex);
+    const auto it = g_reconstructions.find(handle);
+    if (it == g_reconstructions.end() || directory.empty()) {
+        return false;
+    }
+    return it->second->loadMap(directory);
+}
+
 int reconstructionPointCount(ReconstructionHandle handle) {
     std::lock_guard<std::mutex> lock(g_reconstruction_mutex);
     const auto it = g_reconstructions.find(handle);

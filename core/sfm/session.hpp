@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "feature/feature_extractor.hpp"
@@ -51,6 +52,18 @@ public:
 
     /// Copies one view's estimated pose. False for an out-of-range index.
     bool copyCamera(int index, double out_rotation[9], double out_centre_m[3]) const;
+
+    /// Writes the reconstructed map to `directory` (map file plus one feature file per view), so
+    /// another process can relocalise against a scan it did not build (D058). False when no view
+    /// was registered or the directory cannot be written.
+    bool saveMap(const std::string& directory) const;
+
+    /// Replaces this session with the map stored in `directory`: views, features, poses and
+    /// points. Tracking then works exactly as after a run. False leaves the session untouched.
+    bool loadMap(const std::string& directory);
+
+    /// Report of the last run (or of the loaded map).
+    const ReconstructionReport& report() const { return result_.report; }
 
     /// Immutable copy of the map, for tracking while this session runs the next one (D051).
     std::shared_ptr<const Tracker> snapshot() const;

@@ -35,6 +35,7 @@ add_library(scand3d_core SHARED
     sensors/tilt_orientation.cpp
     sfm/bundle_adjustment.cpp
     sfm/keyframe_selection.cpp
+    sfm/map_file.cpp
     sfm/map_store.cpp
     sfm/pipeline.cpp
     sfm/pnp.cpp

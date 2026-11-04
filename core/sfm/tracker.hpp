@@ -55,6 +55,9 @@ private:
     std::vector<Vec3> point_positions_;
     std::unordered_map<std::uint64_t, int> point_of_feature_;
     std::vector<bool> registered_;
+    /// Registered views a live frame is matched against, nearest to the anchor first (D057).
+    /// 1 keeps the single-reference behaviour.
+    int reference_limit_ = 3;
     feature::FeatureParams feature_params_{};
     PnpOptions pnp_{};
 };

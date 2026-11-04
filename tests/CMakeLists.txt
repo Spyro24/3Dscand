@@ -55,6 +55,7 @@ add_library(scand3d_test_util STATIC
     "${SCAND3D_CORE_DIR}/sensors/tilt_orientation.cpp"
     "${SCAND3D_CORE_DIR}/sfm/bundle_adjustment.cpp"
     "${SCAND3D_CORE_DIR}/sfm/keyframe_selection.cpp"
+    "${SCAND3D_CORE_DIR}/sfm/map_file.cpp"
     "${SCAND3D_CORE_DIR}/sfm/map_store.cpp"
     "${SCAND3D_CORE_DIR}/sfm/pipeline.cpp"
     "${SCAND3D_CORE_DIR}/sfm/pnp.cpp"
@@ -148,6 +149,12 @@ add_executable(session_test
 )
 target_link_libraries(session_test PRIVATE scand3d_test_util GTest::gtest_main)
 gtest_discover_tests(session_test)
+
+add_executable(map_file_test
+    native/map_file_test.cpp
+)
+target_link_libraries(map_file_test PRIVATE scand3d_test_util GTest::gtest_main)
+gtest_discover_tests(map_file_test)
 
 add_executable(point_color_test
     native/point_color_test.cpp

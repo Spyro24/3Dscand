@@ -47,6 +47,8 @@ struct SfmOptions {
     int max_view_gap = 2;
     /// Lowe-style ratio gate for neighbour matching, in percent (lower is stricter).
     int match_ratio_percent = 80;
+    /// Registered views the tracker matches each live frame against (D057).
+    int track_reference_limit = 3;
     int bundle_adjust_every = 1;
 };
 

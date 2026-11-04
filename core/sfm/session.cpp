@@ -12,6 +12,7 @@
 #include "geometry/two_view.hpp"
 #include "sfm/bundle_adjustment.hpp"
 #include "sfm/keyframe_selection.hpp"
+#include "sfm/map_file.hpp"
 #include "sfm/pnp.hpp"
 #include "sfm/pose.hpp"
 #include "sfm/report.hpp"
@@ -796,6 +797,69 @@ bool Session::copyCamera(int index, double out_rotation[9], double out_centre_m[
     return true;
 }
 
+bool Session::saveMap(const std::string& directory) const {
+    if (features_.empty() || result_.report.views_registered < 2) {
+        return false;
+    }
+    StoredMap map;
+    map.views.reserve(features_.size());
+    for (std::size_t index = 0; index < features_.size(); ++index) {
+        StoredMapView view;
+        view.camera = cameras_[index];
+        view.features = features_[index];
+        if (index < result_.reconstruction.views.size()) {
+            view.pose = result_.reconstruction.views[index].pose;
+            view.registered = result_.reconstruction.views[index].registered;
+        }
+        map.views.push_back(std::move(view));
+    }
+    map.points = result_.reconstruction.points;
+    return saveMapToDirectory(directory, map);
+}
+
+bool Session::loadMap(const std::string& directory) {
+    StoredMap map;
+    if (!loadMapFromDirectory(directory, map) || map.views.empty()) {
+        return false;
+    }
+
+    Reconstruction reconstruction;
+    reconstruction.views.resize(map.views.size());
+    std::vector<CameraModel> cameras;
+    std::vector<feature::FeatureSet> features;
+    std::vector<std::vector<Vec2>> pixels;
+    cameras.reserve(map.views.size());
+    features.reserve(map.views.size());
+    pixels.reserve(map.views.size());
+    for (std::size_t index = 0; index < map.views.size(); ++index) {
+        StoredMapView& stored = map.views[index];
+        ViewState& state = reconstruction.views[index];
+        state.camera = stored.camera;
+        state.pose = stored.pose;
+        state.registered = stored.registered;
+        state.feature_count = stored.features.size();
+
+        std::vector<Vec2> view_pixels;
+        view_pixels.reserve(stored.features.keypoints.size());
+        for (const feature::Keypoint& keypoint : stored.features.keypoints) {
+            view_pixels.push_back({keypoint.x_px, keypoint.y_px});
+        }
+        cameras.push_back(stored.camera);
+        pixels.push_back(std::move(view_pixels));
+        features.push_back(std::move(stored.features));
+    }
+    reconstruction.points = std::move(map.points);
+
+    cameras_ = std::move(cameras);
+    features_ = std::move(features);
+    pixels_ = std::move(pixels);
+    result_ = SfmResult{};
+    result_.reconstruction = std::move(reconstruction);
+    result_.report = summarize(result_.reconstruction);
+    ran_ = result_.report.views_registered >= 2;
+    return true;
+}
+
 std::shared_ptr<const Tracker> Session::snapshot() const {
     // Copy the map rather than sharing it: the session rewrites its reconstruction on every run,
     // and a tracker that saw a half-updated map would place the camera in a frame that no longer
@@ -816,6 +880,7 @@ std::shared_ptr<const Tracker> Session::snapshot() const {
     for (const MapPoint& point : result_.reconstruction.points) {
         tracker->point_positions_.push_back(point.position_m);
     }
+    tracker->reference_limit_ = std::max(1, options_.track_reference_limit);
     tracker->feature_params_ = feature_params_;
     tracker->pnp_ = options_.pnp;
     return tracker;

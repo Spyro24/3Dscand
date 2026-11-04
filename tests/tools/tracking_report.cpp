@@ -79,8 +79,20 @@ int main(int argc, char** argv) {
     options.match_ratio_percent = env_int("RATIO", options.match_ratio_percent);
     options.pnp.threshold_px = env_double("PNP_PX", options.pnp.threshold_px);
     options.min_parallax_rad = env_double("PARALLAX_DEG", 1.0) * 0.017453292519943295;
+    options.track_reference_limit = env_int("TRACK_REFS", options.track_reference_limit);
     scand3d::sfm::Session session(options, feature_params);
-    for (int index = 0; index < map_views; ++index) {
+    // LOAD_MAP relocalises against a stored scan instead of building one from these frames;
+    // SAVE_MAP writes the map out so the next run can do exactly that.
+    const char* load_map = std::getenv("LOAD_MAP");
+    const char* save_map = std::getenv("SAVE_MAP");
+    if (load_map != nullptr) {
+        if (!session.loadMap(load_map)) {
+            std::printf("cannot load a map from %s\n", load_map);
+            return 1;
+        }
+        std::printf("map loaded from %s\n", load_map);
+    }
+    for (int index = 0; index < (load_map != nullptr ? 0 : map_views); ++index) {
         if (session.addView(widths[static_cast<std::size_t>(index)],
                             heights[static_cast<std::size_t>(index)],
                             frames[static_cast<std::size_t>(index)].data(), focal_px,
@@ -89,9 +101,14 @@ int main(int argc, char** argv) {
             std::printf("map view %d rejected\n", index);
         }
     }
-    const scand3d::sfm::ReconstructionReport report = session.run();
+    const scand3d::sfm::ReconstructionReport report =
+        load_map != nullptr ? session.report() : session.run();
     std::printf("map: %d views, %d registered, %d points\n", session.viewCount(),
                 report.views_registered, session.pointCount());
+    if (save_map != nullptr) {
+        std::printf("map saved to %s: %s\n", save_map,
+                    session.saveMap(save_map) ? "ok" : "failed");
+    }
     std::printf("reprojection mean %.2f median %.2f max %.2f px, weak points %d\n",
                 report.mean_reprojection_px, report.median_reprojection_px,
                 report.max_reprojection_px, report.weakly_supported_points);

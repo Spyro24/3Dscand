@@ -100,6 +100,20 @@ object NativeCore {
     fun reconstructionRun(handle: Long): Int =
         if (isLoaded && handle != 0L) nativeReconstructionRun(handle) else 0
 
+    /** Writes a finished scan's map so a later process can relocalise against it (D058). */
+    fun reconstructionSaveMap(handle: Long, directory: String): Boolean =
+        isLoaded &&
+            handle != 0L &&
+            directory.isNotEmpty() &&
+            nativeReconstructionSaveMap(handle, directory)
+
+    /** Replaces a session with a stored map; false when that directory holds no usable map. */
+    fun reconstructionLoadMap(handle: Long, directory: String): Boolean =
+        isLoaded &&
+            handle != 0L &&
+            directory.isNotEmpty() &&
+            nativeReconstructionLoadMap(handle, directory)
+
     fun reconstructionPointCount(handle: Long): Int =
         if (isLoaded && handle != 0L) nativeReconstructionPointCount(handle) else 0
 
@@ -397,6 +411,10 @@ object NativeCore {
     ): Int
 
     private external fun nativeReconstructionRun(handle: Long): Int
+
+    private external fun nativeReconstructionSaveMap(handle: Long, directory: String): Boolean
+
+    private external fun nativeReconstructionLoadMap(handle: Long, directory: String): Boolean
 
     private external fun nativeReconstructionPointCount(handle: Long): Int
 
